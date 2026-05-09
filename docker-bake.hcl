@@ -3,10 +3,19 @@ variable "DOCKERHUB_REPO_NAME" {
 }
 
 variable "PYTHON_VERSION" {
-    default = "3.13"
+    default = "3.12"
 }
 variable "TORCH_VERSION" {
     default = "2.8.0"
+}
+variable "TORCHVISION_VERSION" {
+    default = "0.23.0"
+}
+variable "TORCH_VERSION_CU130" {
+    default = "2.10.0"
+}
+variable "TORCHVISION_VERSION_CU130" {
+    default = "0.25.0"
 }
 
 variable "EXTRA_TAG" {
@@ -24,6 +33,7 @@ target "_common" {
     args = {
         PYTHON_VERSION     = PYTHON_VERSION
         TORCH_VERSION      = TORCH_VERSION
+        TORCHVISION_VERSION = TORCHVISION_VERSION
     }
 }
 
@@ -72,12 +82,23 @@ target "_cu130" {
     args = {
         BASE_IMAGE         = "nvidia/cuda:13.0.0-devel-ubuntu24.04"
         CUDA_VERSION       = "cu130"
+        TORCH_VERSION      = TORCH_VERSION_CU130
+        TORCHVISION_VERSION = TORCHVISION_VERSION_CU130
     }
 }
 
 target "_no_custom_nodes" {
     args = {
         SKIP_CUSTOM_NODES = "1"
+    }
+}
+
+# Z Image Turbo preset — bake the full model set into the image so startup does
+# not need to download models into the runtime volume.
+target "_zit" {
+    args = {
+        ENABLE_ZIT_AUTOLOAD = "1"
+        BAKE_ZIT_MODELS     = "1"
     }
 }
 
@@ -108,7 +129,7 @@ target "base-12-9" {
 
 target "base-13-0" {
     inherits = ["_cu130"]
-    tags = tag("base", "cu130")
+    tags = ["${DOCKERHUB_REPO_NAME}:base-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
 }
 
 target "slim-12-4" {
@@ -138,5 +159,10 @@ target "slim-12-9" {
 
 target "slim-13-0" {
     inherits = ["_cu130", "_no_custom_nodes"]
-    tags = tag("slim", "cu130")
+    tags = ["${DOCKERHUB_REPO_NAME}:slim-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
+}
+
+target "zit-12-8" {
+    inherits = ["_cu128", "_zit"]
+    tags = tag("zit", "cu128")
 }

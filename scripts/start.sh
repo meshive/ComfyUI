@@ -11,6 +11,24 @@ start_nginx() {
     service nginx start
 }
 
+dump_startup_logs() {
+    if [ "${STARTUP_LOGS_DUMPED:-0}" = "1" ]; then
+        return
+    fi
+    STARTUP_LOGS_DUMPED=1
+
+    local status=$?
+    echo "**** start.sh exiting at $(date -Is) with status ${status} ****"
+    if [ -f /workspace/logs/comfyui_3000.log ]; then
+        echo "**** Last 200 lines of /workspace/logs/comfyui_3000.log ****"
+        tail -n 200 /workspace/logs/comfyui_3000.log || true
+    else
+        echo "**** /workspace/logs/comfyui_3000.log not found ****"
+    fi
+}
+
+trap dump_startup_logs EXIT TERM INT
+
 # Execute script if exists
 execute_script() {
     local script_path=$1
@@ -124,6 +142,129 @@ start_code_server() {
     echo "code-server started"
 }
 
+ensure_model_dirs() {
+    local target_models="$1"
+
+    if [ -z "$target_models" ]; then
+        return 0
+    fi
+
+    mkdir -p "$target_models/checkpoints" "$target_models/loras" "$target_models/vae" \
+             "$target_models/controlnet" "$target_models/upscale_models" \
+             "$target_models/embeddings" "$target_models/configs" "$target_models/clip" \
+             "$target_models/clip_vision" "$target_models/diffusion_models" \
+             "$target_models/text_encoders" "$target_models/audio_encoders" \
+             "$target_models/model_patches" "$target_models/output" || true
+}
+
+read_model_base_path() {
+    local config_path="$1"
+
+    awk -F ':' '
+        /^[[:space:]]*base_path[[:space:]]*:/ {
+            value=$2
+            sub(/^[[:space:]]*/, "", value)
+            sub(/[[:space:]]*$/, "", value)
+            print value
+            exit
+        }
+    ' "$config_path" 2>/dev/null || true
+}
+
+is_mounted_path() {
+    local target_path="$1"
+
+    awk -v target="$target_path" '$2 == target { found=1 } END { exit(found ? 0 : 1) }' /proc/mounts
+}
+
+has_model_files() {
+    local target_path="$1"
+
+    [ -d "$target_path" ] && [ -n "$(find "$target_path" -type f | head -n 1)" ]
+}
+
+configure_model_paths() {
+    local target_models=""
+    local config_path="/workspace/ComfyUI/extra_model_paths.yaml"
+
+    if [ -f "$config_path" ]; then
+        target_models="$(read_model_base_path "$config_path")"
+        if [ -n "$target_models" ]; then
+            MODEL_MOUNT_PATH="$target_models"
+            export MODEL_MOUNT_PATH
+            ensure_model_dirs "$target_models"
+            echo "[Auto-Mount] existing extra_model_paths.yaml found: $target_models"
+        else
+            echo "[Auto-Mount] existing extra_model_paths.yaml found, but base_path could not be parsed."
+        fi
+        return
+    fi
+
+    if has_model_files /ComfyUI/models; then
+        target_models="/ComfyUI/models"
+        echo "[Auto-Mount] 이미지 내장 모델 경로 발견: $target_models"
+    elif [ -d /workspace/models ]; then
+        target_models="/workspace/models"
+        echo "[Auto-Mount] 모델 마운트 발견: $target_models"
+    else
+        echo '[Auto-Mount] /mnt 경로 하위에서 storage 패턴을 찾는 중...'
+        if [ -d /mnt ]; then
+            target_models=$(find /mnt -maxdepth 1 -name 'storage*' -type d | head -n 1 || true)
+        fi
+    fi
+
+    if [ -z "$target_models" ]; then
+        echo '[Auto-Mount] 경고: 모델 마운트 경로를 찾지 못했습니다.'
+        return
+    fi
+
+    MODEL_MOUNT_PATH="$target_models"
+    export MODEL_MOUNT_PATH
+    ensure_model_dirs "$target_models"
+
+    printf "comfyui:\n    base_path: %s\n    checkpoints: checkpoints/\n    loras: loras/\n    vae: vae/\n    configs: configs/\n    controlnet: controlnet/\n    upscale_models: upscale_models/\n    embeddings: embeddings/\n    clip: clip/\n    clip_vision: clip_vision/\n    diffusion_models: diffusion_models/\n    text_encoders: text_encoders/\n    audio_encoders: audio_encoders/\n    model_patches: model_patches/\n" "$target_models" > "$config_path"
+    echo '[Auto-Mount] extra_model_paths.yaml 설정 완료'
+}
+
+download_model_presets() {
+    local presets="${PRESET_DOWNLOAD:-}"
+
+    if [ -z "$presets" ]; then
+        return
+    fi
+
+    if [ ! -f /download_presets.sh ]; then
+        echo "[Preset] /download_presets.sh not found. Skipping PRESET_DOWNLOAD=$presets"
+        return
+    fi
+
+    local models_root="${MODEL_MOUNT_PATH:-}"
+    if [ -z "$models_root" ]; then
+        if [ "${ALLOW_PRESET_DOWNLOAD_WITHOUT_MODEL_MOUNT,,}" != "true" ]; then
+            echo "[Preset] 경고: 모델 마운트 경로를 찾지 못해 PRESET_DOWNLOAD=$presets 를 건너뜁니다."
+            echo "[Preset] 시스템 스토리지 보호를 위해 모델 마운트 없이 자동 다운로드하지 않습니다."
+            return
+        fi
+
+        models_root="/workspace/models"
+        echo "[Preset] 경고: 모델 마운트 없이 $models_root 로 다운로드합니다."
+    fi
+
+    if [ "${ALLOW_PRESET_DOWNLOAD_WITHOUT_MODEL_MOUNT,,}" != "true" ] && ! is_mounted_path "$models_root"; then
+        echo "[Preset] 경고: $models_root 는 마운트 포인트가 아니라서 PRESET_DOWNLOAD=$presets 를 건너뜁니다."
+        echo "[Preset] 시스템 스토리지 보호를 위해 모델 마운트가 확인된 경우에만 자동 다운로드합니다."
+        return
+    fi
+
+    ensure_model_dirs "$models_root"
+
+    local tmp_dir="${PRESET_TMP_DIR:-$models_root/.tmp/preset-downloads}"
+    mkdir -p "$tmp_dir"
+
+    echo "[Preset] downloading presets into model mount: $models_root"
+    MODELS_ROOT="$models_root" TMP_DIR="$tmp_dir" /download_presets.sh --quiet "$presets"
+}
+
 # ---------------------------------------------------------------------------- #
 #                               Main Program                                   #
 # ---------------------------------------------------------------------------- #
@@ -132,29 +273,18 @@ start_nginx
 
 execute_script "/pre_start.sh" "Running pre-start script..."
 
-echo '[Auto-Mount] /mnt 경로 하위에서 storage 패턴을 찾는 중...'
-TARGET_MNT=$(find /mnt -maxdepth 1 -name 'storage*' -type d | head -n 1)
-
-if [ -z "$TARGET_MNT" ]; then
-    echo '[Auto-Mount] 경고: /mnt/storage* 패턴과 일치하는 경로를 찾지 못했습니다.'
-else
-    echo "[Auto-Mount] 스토리지 발견: $TARGET_MNT"
-
-    mkdir -p "$TARGET_MNT/checkpoints" "$TARGET_MNT/loras" "$TARGET_MNT/vae" \
-             "$TARGET_MNT/controlnet" "$TARGET_MNT/upscale_models" "$TARGET_MNT/embeddings" "$TARGET_MNT/output" || true
-
-    printf "comfyui:\n    base_path: %s\n    checkpoints: checkpoints/\n    loras: loras/\n    text_encoders: text_encoders/\n    vae: vae/\n    controlnet: controlnet/\n    upscale_models: upscale_models/\n    embeddings: embeddings/\n" "$TARGET_MNT" > /workspace/ComfyUI/extra_model_paths.yaml
-    echo '[Auto-Mount] extra_model_paths.yaml 설정 완료'
-fi
+configure_model_paths
 
 echo "Pod Started"
+
+execute_script "/post_start.sh" "Running post-start script..."
+
+download_model_presets &
 
 setup_ssh
 start_jupyter
 start_code_server
 export_env_vars
-
-execute_script "/post_start.sh" "Running post-start script..."
 
 echo "Start script(s) finished, pod is ready to use."
 

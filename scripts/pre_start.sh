@@ -33,7 +33,17 @@ update_venv_paths() {
 
 echo "**** syncing venv to workspace, please wait. This could take a while on first startup! ****"
 if [ -d /venv ]; then
-    if rsync -au --remove-source-files /venv/ /workspace/venv/ && rm -rf /venv; then
+    IMAGE_STACK_ID="$(cat /venv/.pytorch-stack-id 2>/dev/null || true)"
+    WORKSPACE_STACK_ID="$(cat /workspace/venv/.pytorch-stack-id 2>/dev/null || true)"
+
+    if [ -d /workspace/venv ] && [ -n "$IMAGE_STACK_ID" ] && [ "$WORKSPACE_STACK_ID" != "$IMAGE_STACK_ID" ]; then
+        echo "**** workspace venv PyTorch stack mismatch; replacing /workspace/venv ****"
+        echo "**** image stack: $IMAGE_STACK_ID ****"
+        echo "**** workspace stack: ${WORKSPACE_STACK_ID:-missing} ****"
+        rm -rf /workspace/venv
+    fi
+
+    if rsync -a --delete /venv/ /workspace/venv/ && rm -rf /venv; then
         update_venv_paths
     fi
 else
@@ -42,27 +52,22 @@ fi
 
 echo "**** syncing ComfyUI to workspace, please wait ****"
 if [ -d /ComfyUI ]; then
-
-    SRC_MODELS="/ComfyUI/models"
-    DST_MODELS="/workspace/ComfyUI/models"
-
-    EXCLUDE_MODELS=""
-
-    if [ -d "$DST_MODELS" ] && [ "$(ls -A "$DST_MODELS")" ]; then
-        for d in "$DST_MODELS"/*/; do
-            [ -d "$d" ] || continue
-            folder_name=$(basename "$d")
-            EXCLUDE_MODELS="$EXCLUDE_MODELS --exclude='models/$folder_name/**'"
-        done
-        echo "**** Excluding existing model folders: $EXCLUDE_MODELS ****"
-    fi
-
+    EXCLUDE=""
     if [ -d /workspace/ComfyUI/output ]; then
-        EXCLUDE_MODELS="$EXCLUDE_MODELS --exclude='output/'"
+        EXCLUDE="--exclude=output/"
         echo "**** Excluding existing output folder ****"
     fi
 
-    rsync -au --remove-source-files $EXCLUDE_MODELS /ComfyUI/ /workspace/ComfyUI/ && rm -rf /ComfyUI
+    # Sync the image's ComfyUI tree (app code, custom_nodes,
+    # user/default/workflows, etc.) into the workspace. Baked models under
+    # /ComfyUI/models stay in the image layer and are referenced directly.
+    rsync -au --remove-source-files --exclude=/models/ $EXCLUDE /ComfyUI/ /workspace/ComfyUI/
+
+    # Clean up emptied source dirs but keep /ComfyUI/models intact for image
+    # variants that bake models there.
+    find /ComfyUI -mindepth 1 -type d -empty \
+        -not \( -path '/ComfyUI/models' -o -path '/ComfyUI/models/*' \) \
+        -delete 2>/dev/null || true
 
 else
     echo "Skip: /ComfyUI does not exist."
@@ -90,5 +95,3 @@ if [ "${INSTALL_CUSTOM_NODES,,}" = "true" ]; then
         echo "**** /install_custom_nodes.sh not found. Skipping. ****"
     fi
 fi
-
-/download_presets.sh --quiet "${PRESET_DOWNLOAD}"
