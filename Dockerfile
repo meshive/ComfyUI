@@ -80,12 +80,16 @@ RUN uv python install ${PYTHON_VERSION} --default --preview && \
     uv venv --seed /venv
 ENV PATH="/workspace/venv/bin:/venv/bin:$PATH"
 
-# Install essential Python packages and dependencies
+# Install essential Python packages and dependencies. triton is required by
+# many ComfyUI custom nodes (xformers, attention kernels) on CUDA wheels, so we
+# install it explicitly rather than relying on the PyTorch wheel's transitive
+# dependency.
 RUN pip install --no-cache-dir -U \
     pip setuptools wheel \
     jupyterlab jupyterlab_widgets ipykernel ipywidgets \
     huggingface_hub hf_transfer \
-    numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml
+    numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml \
+    triton
 
 # Keep the PyTorch stack on one official wheel index so torch,
 # torchvision, torchaudio, and triton are ABI-compatible.
@@ -176,9 +180,10 @@ RUN if [ -n "$BAKE_PRESET" ]; then \
     fi && \
     rm -rf /custom_extensions
 
-# Bake the model set for the selected preset.
+# Bake the model set for the selected preset. Models are multi-GB so we retry
+# transient network failures to keep CI builds from flaking on connection drops.
 RUN set -e; \
-    dl() { wget -q --show-progress -O "$2" "$1"; }; \
+    dl() { wget -q --show-progress --retry-connrefused --tries=3 --waitretry=5 -O "$2" "$1"; }; \
     case "$BAKE_PRESET" in \
         "") echo "No preset baking";; \
         zit) \
