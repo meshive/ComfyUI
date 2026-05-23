@@ -91,16 +91,30 @@ RUN pip install --no-cache-dir -U \
     numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml \
     triton
 
-# Keep the PyTorch stack on one official wheel index so torch,
-# torchvision, torchaudio, and triton are ABI-compatible.
-RUN pip install --no-cache-dir \
-    torch==${TORCH_VERSION} \
-    torchvision==${TORCHVISION_VERSION} \
-    torchaudio==${TORCH_VERSION} \
-    --index-url https://download.pytorch.org/whl/${CUDA_VERSION}
+# Install the PyTorch stack. TORCH_VERSION="nightly" triggers the nightly
+# wheel index (used for cu130 / Blackwell sm_120 because torch 2.10.0 stable's
+# bundled cuBLAS has a known sm_120 CUBLAS_STATUS_INVALID_VALUE bug). All
+# other versions install pinned wheels from the stable index. Either way, the
+# constraints file is generated from the *actually installed* versions so the
+# downstream custom-node installs don't accidentally pull a different stack.
+RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
+        pip install --no-cache-dir --pre \
+            torch torchvision torchaudio \
+            --index-url "https://download.pytorch.org/whl/nightly/${CUDA_VERSION}"; \
+    else \
+        pip install --no-cache-dir \
+            torch==${TORCH_VERSION} \
+            torchvision==${TORCHVISION_VERSION} \
+            torchaudio==${TORCH_VERSION} \
+            --index-url "https://download.pytorch.org/whl/${CUDA_VERSION}"; \
+    fi
 
-RUN printf "torch==%s\ntorchvision==%s\ntorchaudio==%s\n" \
-    "${TORCH_VERSION}" "${TORCHVISION_VERSION}" "${TORCH_VERSION}" > /pytorch-constraints.txt
+# Capture the actually-installed versions so custom-node requirements use the
+# same nightly build (otherwise a transitive `torch>=X` could pull a different
+# wheel from PyPI).
+RUN python -c "import torch, torchvision, torchaudio; \
+    open('/pytorch-constraints.txt', 'w').write( \
+        f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')"
 
 # Install ComfyUI and ComfyUI Manager
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git && \
@@ -122,13 +136,27 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
     fi
 
 # Custom node dependencies may pull a different PyTorch wheel from PyPI.
-# Re-assert the CUDA-specific stack after those installs.
-RUN pip install --no-cache-dir --force-reinstall \
-    torch==${TORCH_VERSION} \
-    torchvision==${TORCHVISION_VERSION} \
-    torchaudio==${TORCH_VERSION} \
-    --index-url https://download.pytorch.org/whl/${CUDA_VERSION} && \
-    printf "%s\n" "$PYTORCH_STACK_ID" > /venv/.pytorch-stack-id
+# Re-assert the CUDA-specific stack after those installs. Uses the same
+# nightly / stable branching as the initial install.
+RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
+        pip install --no-cache-dir --pre --force-reinstall \
+            torch torchvision torchaudio \
+            --index-url "https://download.pytorch.org/whl/nightly/${CUDA_VERSION}"; \
+    else \
+        pip install --no-cache-dir --force-reinstall \
+            torch==${TORCH_VERSION} \
+            torchvision==${TORCHVISION_VERSION} \
+            torchaudio==${TORCH_VERSION} \
+            --index-url "https://download.pytorch.org/whl/${CUDA_VERSION}"; \
+    fi && \
+    # Re-capture installed versions and update the stack-id with the resolved
+    # torch version so pre_start.sh can detect mismatches with workspace venvs.
+    python -c "import torch, torchvision, torchaudio; \
+        open('/pytorch-constraints.txt', 'w').write( \
+            f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')" && \
+    python -c "import torch, torchvision; \
+        stack_id = f'python-${PYTHON_VERSION}-torch-{torch.__version__}-torchvision-{torchvision.__version__}-${CUDA_VERSION}'; \
+        open('/venv/.pytorch-stack-id', 'w').write(stack_id + '\n')"
 
 # Install Runpod CLI
 #RUN wget -qO- cli.runpod.net | sudo bash
