@@ -3,7 +3,7 @@ variable "DOCKERHUB_REPO_NAME" {
 }
 
 variable "PYTHON_VERSION" {
-    default = "3.12"
+    default = "3.13"
 }
 variable "TORCH_VERSION" {
     default = "2.8.0"
@@ -11,6 +11,8 @@ variable "TORCH_VERSION" {
 variable "TORCHVISION_VERSION" {
     default = "0.23.0"
 }
+# Blackwell (RTX 5090, RTX PRO 6000) cu130 targets need a newer torch stack;
+# torch 2.8.0 has no cu130 wheel, the earliest cu130 build is torch 2.9.0.
 variable "TORCH_VERSION_CU130" {
     default = "2.10.0"
 }
@@ -25,6 +27,12 @@ variable "EXTRA_TAG" {
 function "tag" {
     params = [tag, cuda]
     result = ["${DOCKERHUB_REPO_NAME}:${tag}-torch${TORCH_VERSION}-${cuda}${EXTRA_TAG}"]
+}
+
+# Tag helper for cu130 targets that use the TORCH_VERSION_CU130 stack.
+function "tag_cu130" {
+    params = [name]
+    result = ["${DOCKERHUB_REPO_NAME}:${name}-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
 }
 
 target "_common" {
@@ -80,9 +88,9 @@ target "_cu129" {
 target "_cu130" {
     inherits = ["_common"]
     args = {
-        BASE_IMAGE         = "nvidia/cuda:13.0.0-devel-ubuntu24.04"
-        CUDA_VERSION       = "cu130"
-        TORCH_VERSION      = TORCH_VERSION_CU130
+        BASE_IMAGE          = "nvidia/cuda:13.0.0-devel-ubuntu24.04"
+        CUDA_VERSION        = "cu130"
+        TORCH_VERSION       = TORCH_VERSION_CU130
         TORCHVISION_VERSION = TORCHVISION_VERSION_CU130
     }
 }
@@ -93,13 +101,27 @@ target "_no_custom_nodes" {
     }
 }
 
-# Z Image Turbo preset — bake the full model set into the image so startup does
-# not need to download models into the runtime volume.
-target "_zit" {
-    args = {
-        ENABLE_ZIT_AUTOLOAD = "1"
-        BAKE_ZIT_MODELS     = "1"
-    }
+# Workflow preset bundles. Each preset installs the matching auto-load
+# extension and bakes its model set into the image so startup needs no
+# downloads. Composed with a _cuXXX base.
+target "_preset_zit" {
+    args = { BAKE_PRESET = "zit" }
+}
+
+target "_preset_flux" {
+    args = { BAKE_PRESET = "flux" }
+}
+
+target "_preset_qwen" {
+    args = { BAKE_PRESET = "qwen" }
+}
+
+target "_preset_ltx" {
+    args = { BAKE_PRESET = "ltx" }
+}
+
+target "_preset_wan" {
+    args = { BAKE_PRESET = "wan" }
 }
 
 target "base-12-4" {
@@ -129,7 +151,7 @@ target "base-12-9" {
 
 target "base-13-0" {
     inherits = ["_cu130"]
-    tags = ["${DOCKERHUB_REPO_NAME}:base-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
+    tags = tag_cu130("base")
 }
 
 target "slim-12-4" {
@@ -159,10 +181,32 @@ target "slim-12-9" {
 
 target "slim-13-0" {
     inherits = ["_cu130", "_no_custom_nodes"]
-    tags = ["${DOCKERHUB_REPO_NAME}:slim-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
+    tags = tag_cu130("slim")
 }
 
-target "zit-12-8" {
-    inherits = ["_cu128", "_zit"]
-    tags = tag("zit", "cu128")
+# Blackwell-ready (cu130) workflow preset bundles. Each image ships with the
+# matching auto-load extension and a pre-baked model set.
+target "zit-13-0" {
+    inherits = ["_cu130", "_preset_zit"]
+    tags = tag_cu130("zit")
+}
+
+target "flux-13-0" {
+    inherits = ["_cu130", "_preset_flux"]
+    tags = tag_cu130("flux")
+}
+
+target "qwen-13-0" {
+    inherits = ["_cu130", "_preset_qwen"]
+    tags = tag_cu130("qwen")
+}
+
+target "ltx-13-0" {
+    inherits = ["_cu130", "_preset_ltx"]
+    tags = tag_cu130("ltx")
+}
+
+target "wan-13-0" {
+    inherits = ["_cu130", "_preset_wan"]
+    tags = tag_cu130("wan")
 }

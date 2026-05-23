@@ -15,11 +15,11 @@ ARG CUDA_VERSION
 ARG SKIP_CUSTOM_NODES
 # Comma-separated list of presets to download into the model mount at runtime.
 ARG DEFAULT_PRESET_DOWNLOAD=""
-# Enables the Z Image Turbo workflow autoload extension.
-ARG ENABLE_ZIT_AUTOLOAD=""
-# When set to "1", bakes the full Z Image Turbo model set into /ComfyUI/models/
-# at build time so startup does not need to download models.
-ARG BAKE_ZIT_MODELS=""
+# Selects a bundled workflow preset to bake into the image. When non-empty,
+# the matching auto-load extension and model set are both installed at build
+# time so first launch needs no downloads. One of:
+#   "" (none) | zit | flux | qwen | ltx | wan
+ARG BAKE_PRESET=""
 
 ENV TORCH_VERSION=${TORCH_VERSION}
 ENV TORCHVISION_VERSION=${TORCHVISION_VERSION}
@@ -164,31 +164,95 @@ COPY workflows/ /ComfyUI/user/default/workflows/
 # whose models they don't have.
 COPY custom_extensions/ /custom_extensions/
 
-# Install the matching auto-load extension when requested.
-RUN if [ "$ENABLE_ZIT_AUTOLOAD" = "1" ]; then \
-        cp -r /custom_extensions/zit-autoload /ComfyUI/custom_nodes/zit-autoload; \
+# Install the matching auto-load extension when a preset is requested.
+# /workspace/models is a runtime volume mount, so baked files live under
+# /ComfyUI/models/ which pre_start.sh layers over the user's mount on first boot.
+RUN if [ -n "$BAKE_PRESET" ]; then \
+        if [ ! -d "/custom_extensions/${BAKE_PRESET}-autoload" ]; then \
+            echo "Unknown BAKE_PRESET=${BAKE_PRESET} (no /custom_extensions/${BAKE_PRESET}-autoload)" >&2; \
+            exit 1; \
+        fi; \
+        cp -r "/custom_extensions/${BAKE_PRESET}-autoload" "/ComfyUI/custom_nodes/${BAKE_PRESET}-autoload"; \
     fi && \
     rm -rf /custom_extensions
 
-# Optionally bake the Z Image Turbo model set into the image. /workspace/models
-# is a runtime volume mount, so baked files must live outside that path.
-RUN if [ "$BAKE_ZIT_MODELS" = "1" ]; then \
-        mkdir -p /ComfyUI/models/text_encoders \
-                 /ComfyUI/models/diffusion_models \
-                 /ComfyUI/models/vae \
-                 /ComfyUI/models/loras \
-                 /ComfyUI/models/model_patches && \
-        wget -q --show-progress -O /ComfyUI/models/text_encoders/qwen_3_4b.safetensors \
-            https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors && \
-        wget -q --show-progress -O /ComfyUI/models/diffusion_models/z_image_turbo_bf16.safetensors \
-            https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors && \
-        wget -q --show-progress -O /ComfyUI/models/vae/ae.safetensors \
-            https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors && \
-        wget -q --show-progress -O /ComfyUI/models/loras/pixel_art_style_z_image_turbo.safetensors \
-            https://huggingface.co/tarn59/pixel_art_style_lora_z_image_turbo/resolve/main/pixel_art_style_z_image_turbo.safetensors && \
-        wget -q --show-progress -O /ComfyUI/models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors \
-            https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors; \
-    fi
+# Bake the model set for the selected preset.
+RUN set -e; \
+    dl() { wget -q --show-progress -O "$2" "$1"; }; \
+    case "$BAKE_PRESET" in \
+        "") echo "No preset baking";; \
+        zit) \
+            mkdir -p /ComfyUI/models/text_encoders \
+                     /ComfyUI/models/diffusion_models \
+                     /ComfyUI/models/vae \
+                     /ComfyUI/models/loras \
+                     /ComfyUI/models/model_patches; \
+            dl https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors \
+               /ComfyUI/models/text_encoders/qwen_3_4b.safetensors; \
+            dl https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors \
+               /ComfyUI/models/diffusion_models/z_image_turbo_bf16.safetensors; \
+            dl https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors \
+               /ComfyUI/models/vae/ae.safetensors; \
+            dl https://huggingface.co/tarn59/pixel_art_style_lora_z_image_turbo/resolve/main/pixel_art_style_z_image_turbo.safetensors \
+               /ComfyUI/models/loras/pixel_art_style_z_image_turbo.safetensors; \
+            dl https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors \
+               /ComfyUI/models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors; \
+            ;; \
+        flux) \
+            mkdir -p /ComfyUI/models/diffusion_models \
+                     /ComfyUI/models/text_encoders \
+                     /ComfyUI/models/vae; \
+            dl https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell.safetensors \
+               /ComfyUI/models/diffusion_models/flux1-schnell.safetensors; \
+            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors \
+               /ComfyUI/models/text_encoders/clip_l.safetensors; \
+            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors \
+               /ComfyUI/models/text_encoders/t5xxl_fp16.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors \
+               /ComfyUI/models/vae/ae.safetensors; \
+            ;; \
+        qwen) \
+            mkdir -p /ComfyUI/models/diffusion_models \
+                     /ComfyUI/models/text_encoders \
+                     /ComfyUI/models/vae \
+                     /ComfyUI/models/loras; \
+            dl https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors \
+               /ComfyUI/models/diffusion_models/qwen_image_fp8_e4m3fn.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors \
+               /ComfyUI/models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors \
+               /ComfyUI/models/vae/qwen_image_vae.safetensors; \
+            dl https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V1.0.safetensors \
+               /ComfyUI/models/loras/Qwen-Image-Lightning-8steps-V1.0.safetensors; \
+            ;; \
+        ltx) \
+            mkdir -p /ComfyUI/models/checkpoints \
+                     /ComfyUI/models/text_encoders; \
+            dl https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors \
+               /ComfyUI/models/checkpoints/ltx-video-2b-v0.9.safetensors; \
+            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors \
+               /ComfyUI/models/text_encoders/t5xxl_fp16.safetensors; \
+            ;; \
+        wan) \
+            mkdir -p /ComfyUI/models/diffusion_models \
+                     /ComfyUI/models/text_encoders \
+                     /ComfyUI/models/vae \
+                     /ComfyUI/models/loras; \
+            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors \
+               /ComfyUI/models/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors \
+               /ComfyUI/models/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors \
+               /ComfyUI/models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors \
+               /ComfyUI/models/vae/wan_2.1_vae.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors \
+               /ComfyUI/models/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors \
+               /ComfyUI/models/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors; \
+            ;; \
+        *) echo "Unknown BAKE_PRESET=${BAKE_PRESET}" >&2; exit 1;; \
+    esac
 
 # Welcome Message
 COPY logo/meshive.txt /etc/meshive.txt
