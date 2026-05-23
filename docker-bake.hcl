@@ -11,13 +11,17 @@ variable "TORCH_VERSION" {
 variable "TORCHVISION_VERSION" {
     default = "0.23.0"
 }
-# Blackwell (RTX 5090, RTX PRO 6000) cu130 targets need a newer torch stack;
-# torch 2.8.0 has no cu130 wheel, the earliest cu130 build is torch 2.9.0.
+# Blackwell (RTX 5090, RTX PRO 5000/6000) cu130 targets ship on PyTorch nightly.
+# torch 2.10.0 stable cu130 wheel ships a cuBLAS build with a known sm_120
+# CUBLAS_STATUS_INVALID_VALUE bug that breaks even simple GEMMs; nightly ships a
+# newer bundled cuBLAS that supports sm_120. The "nightly" sentinel triggers
+# the nightly install path in the Dockerfile; the actual installed version is
+# captured at build time into the constraints file.
 variable "TORCH_VERSION_CU130" {
-    default = "2.10.0"
+    default = "nightly"
 }
 variable "TORCHVISION_VERSION_CU130" {
-    default = "0.25.0"
+    default = "nightly"
 }
 
 variable "EXTRA_TAG" {
