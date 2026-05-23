@@ -43,7 +43,11 @@ if [ -d /venv ]; then
         rm -rf /workspace/venv
     fi
 
-    if rsync -a --delete /venv/ /workspace/venv/ && rm -rf /venv; then
+    # When the PyTorch stack matches, /workspace/venv may contain extra packages
+    # the user installed at runtime; -u (update-only) preserves them. When the
+    # stack mismatches, /workspace/venv was just wiped above, so this still
+    # performs a full copy into an empty target.
+    if rsync -au /venv/ /workspace/venv/ && rm -rf /venv; then
         update_venv_paths
     fi
 else
