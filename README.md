@@ -53,7 +53,7 @@ sombi/comfyui:(A)-torch2.8.0-(B)
 | `TIME_ZONE`             | [Timezone](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones) (e.g., `Asia/Seoul`)   | `Etc/UTC` |
 | `COMFYUI_EXTRA_ARGS`    | Extra ComfyUI options (e.g. `--fast`)                        | (unset)   |
 | `INSTALL_SAGEATTENTION` | Install [SageAttention2](https://github.com/thu-ml/SageAttention) on start (`True`/`False`) | `False`    |
-| `PRESET_DOWNLOAD`       | Download model presets at startup (comma-separated list). **See below**.                  | (unset)   |
+| `PRESET_DOWNLOAD`       | Download model presets into the mounted model storage at startup (comma-separated list). **See below**. | (unset)   |
 
 > 👉 To set: **Edit Pod/Template** → **Add Environment Variable** (Key/Value).
 
@@ -66,6 +66,7 @@ sombi/comfyui:(A)-torch2.8.0-(B)
 > The `PRESET_DOWNLOAD` environment variable accepts either a **single preset** or **multiple presets** separated by commas.\
 > (e.g. `WAINSFW_V140` or `WAN22_I2V_A14B_GGUF_Q8_0,WAN22_LIGHTNING_LORA,WAN22_NSFW_LORA`) \
 > When set, the container will automatically download the corresponding models on startup.
+> Presets are written to the model mount from `extra_model_paths.yaml` (normally `/workspace/models`), and temporary `.part` files are kept under that same mount.
 
 > You can also manually run the preset download script **inside JupyterLab or code-server**:
 
@@ -92,7 +93,7 @@ bash /download_presets.sh PRESET1,PRESET2,...
 ### System
 
 * **OS**: Ubuntu 24.04 (22.02 for CUDA 12.4)
-* **Python**: 3.13
+* **Python**: 3.12
 * **Framework**: [ComfyUI](https://github.com/comfyanonymous/ComfyUI) + [ComfyUI Manager](https://github.com/Comfy-Org/ComfyUI-Manager) + [JupyterLab](https://jupyter.org/) + [code-server](https://github.com/coder/code-server)
 * **Libraries**: PyTorch 2.8.0, CUDA (12.4–12.8), Triton, [hf\_hub](https://huggingface.co/docs/huggingface_hub), [nvtop](https://github.com/Syllo/nvtop)
 
