@@ -257,7 +257,7 @@ RUN set -e; \
 # Welcome Message
 COPY logo/meshive.txt /etc/meshive.txt
 RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
-RUN echo 'echo -e "Nice to meet you and We are Meshive administrator, Thank you."' >> /root/.bashrc
+RUN echo 'echo -e "\nNice to meet you and We are Meshive administrator, Thank you."' >> /root/.bashrc
 
 # Set entrypoint to the start script
 CMD ["/start.sh"]
