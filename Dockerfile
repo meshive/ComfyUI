@@ -234,16 +234,15 @@ RUN set -e; \
         flux) \
             mkdir -p /ComfyUI/models/diffusion_models \
                      /ComfyUI/models/text_encoders \
-                     /ComfyUI/models/vae \
-                     /ComfyUI/models/loras; \
-            dl https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/diffusion_models/flux2_dev_fp8mixed.safetensors \
-               /ComfyUI/models/diffusion_models/flux2_dev_fp8mixed.safetensors; \
-            dl https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/text_encoders/mistral_3_small_flux2_bf16.safetensors \
-               /ComfyUI/models/text_encoders/mistral_3_small_flux2_bf16.safetensors; \
-            dl https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/vae/full_encoder_small_decoder.safetensors \
-               /ComfyUI/models/vae/full_encoder_small_decoder.safetensors; \
-            dl https://huggingface.co/Comfy-Org/flux2-dev/resolve/main/split_files/loras/Flux_2-Turbo-LoRA_comfyui.safetensors \
-               /ComfyUI/models/loras/Flux_2-Turbo-LoRA_comfyui.safetensors; \
+                     /ComfyUI/models/vae; \
+            dl https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell.safetensors \
+               /ComfyUI/models/diffusion_models/flux1-schnell.safetensors; \
+            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors \
+               /ComfyUI/models/text_encoders/clip_l.safetensors; \
+            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors \
+               /ComfyUI/models/text_encoders/t5xxl_fp16.safetensors; \
+            dl https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors \
+               /ComfyUI/models/vae/ae.safetensors; \
             ;; \
         qwen) \
             mkdir -p /ComfyUI/models/diffusion_models \

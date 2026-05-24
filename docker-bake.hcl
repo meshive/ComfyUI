@@ -215,7 +215,7 @@ target "zit-13-0" {
 
 target "flux-13-0" {
     inherits = ["_cu130", "_preset_flux"]
-    tags = tag_cu130("flux2-fp8")
+    tags = tag_cu130("flux1-schnell")
 }
 
 target "qwen-13-0" {
