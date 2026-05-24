@@ -28,31 +28,16 @@ variable "EXTRA_TAG" {
     default = ""
 }
 
-# Build identifier appended to cu130 image tags (e.g. "20260524-153012").
-# Pass via `BUILD_TIMESTAMP=$(date -u +%Y%m%d-%H%M%S) docker buildx bake ...`
-# so every build gets a unique, datable tag. Verified builds can later be
-# promoted to canonical names (e.g. `flux2-fp8`) via `docker buildx imagetools
-# create -t <canonical> <timestamped>`.
-variable "BUILD_TIMESTAMP" {
-    default = ""
-}
-
 function "tag" {
     params = [tag, cuda]
     result = ["${DOCKERHUB_REPO_NAME}:${tag}-torch${TORCH_VERSION}-${cuda}${EXTRA_TAG}"]
 }
 
-# Tag helper for cu130 targets. Uses the user-facing variant name (e.g.
-# "flux2-fp8") and appends BUILD_TIMESTAMP when set so each build is uniquely
-# tagged. When BUILD_TIMESTAMP is empty the tag is the bare variant name —
-# useful for promoting a verified build to the canonical name.
+# Tag helper for cu130 targets. Uses the user-facing variant name
+# (e.g. "flux1-schnell", "wan22-i2v-fp8") as the bare tag.
 function "tag_cu130" {
     params = [variant]
-    result = [
-        notequal(BUILD_TIMESTAMP, "")
-            ? "${DOCKERHUB_REPO_NAME}:${variant}-${BUILD_TIMESTAMP}${EXTRA_TAG}"
-            : "${DOCKERHUB_REPO_NAME}:${variant}${EXTRA_TAG}"
-    ]
+    result = ["${DOCKERHUB_REPO_NAME}:${variant}${EXTRA_TAG}"]
 }
 
 target "_common" {
