@@ -1,10 +1,10 @@
 import { app } from "../../scripts/app.js";
 
-// Loads the bundled Flux Schnell workflow once per browser, only if the user
-// hasn't already loaded a non-trivial graph. ComfyUI's own per-tab persistence
-// takes over on subsequent visits, so user edits aren't clobbered.
-const FLAG = "flux.autoloaded.v1";
-const WORKFLOW_URL = new URL("./flux_schnell.json", import.meta.url);
+// Loads the bundled Flux 2 Dev (fp8) workflow once per browser, only if the
+// user hasn't already loaded a non-trivial graph. ComfyUI's own per-tab
+// persistence takes over on subsequent visits, so user edits aren't clobbered.
+const FLAG = "flux.autoloaded.v2";
+const WORKFLOW_URL = new URL("./flux2_dev_fp8.json", import.meta.url);
 
 app.registerExtension({
     name: "flux.autoload",
@@ -30,7 +30,7 @@ app.registerExtension({
             const data = await res.json();
             await app.loadGraphData(data);
             localStorage.setItem(FLAG, "1");
-            console.log("[flux] auto-loaded Flux Schnell workflow");
+            console.log("[flux] auto-loaded Flux 2 Dev (fp8) workflow");
         } catch (e) {
             console.warn("[flux] auto-load error:", e);
         }
