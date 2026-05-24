@@ -28,15 +28,31 @@ variable "EXTRA_TAG" {
     default = ""
 }
 
+# Build identifier appended to cu130 image tags (e.g. "20260524-153012").
+# Pass via `BUILD_TIMESTAMP=$(date -u +%Y%m%d-%H%M%S) docker buildx bake ...`
+# so every build gets a unique, datable tag. Verified builds can later be
+# promoted to canonical names (e.g. `flux2-fp8`) via `docker buildx imagetools
+# create -t <canonical> <timestamped>`.
+variable "BUILD_TIMESTAMP" {
+    default = ""
+}
+
 function "tag" {
     params = [tag, cuda]
     result = ["${DOCKERHUB_REPO_NAME}:${tag}-torch${TORCH_VERSION}-${cuda}${EXTRA_TAG}"]
 }
 
-# Tag helper for cu130 targets that use the TORCH_VERSION_CU130 stack.
+# Tag helper for cu130 targets. Uses the user-facing variant name (e.g.
+# "flux2-fp8") and appends BUILD_TIMESTAMP when set so each build is uniquely
+# tagged. When BUILD_TIMESTAMP is empty the tag is the bare variant name —
+# useful for promoting a verified build to the canonical name.
 function "tag_cu130" {
-    params = [name]
-    result = ["${DOCKERHUB_REPO_NAME}:${name}-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
+    params = [variant]
+    result = [
+        notequal(BUILD_TIMESTAMP, "")
+            ? "${DOCKERHUB_REPO_NAME}:${variant}-${BUILD_TIMESTAMP}${EXTRA_TAG}"
+            : "${DOCKERHUB_REPO_NAME}:${variant}${EXTRA_TAG}"
+    ]
 }
 
 target "_common" {
@@ -155,7 +171,7 @@ target "base-12-9" {
 
 target "base-13-0" {
     inherits = ["_cu130"]
-    tags = tag_cu130("base")
+    tags = tag_cu130("base-cu130")
 }
 
 target "slim-12-4" {
@@ -185,32 +201,34 @@ target "slim-12-9" {
 
 target "slim-13-0" {
     inherits = ["_cu130", "_no_custom_nodes"]
-    tags = tag_cu130("slim")
+    tags = tag_cu130("slim-cu130")
 }
 
 # Blackwell-ready (cu130) workflow preset bundles. Each image ships with the
-# matching auto-load extension and a pre-baked model set.
+# matching auto-load extension and a pre-baked model set. The tag uses the
+# user-facing model variant name (e.g. "flux2-fp8") with BUILD_TIMESTAMP
+# suffix so multiple build attempts get distinct tags.
 target "zit-13-0" {
     inherits = ["_cu130", "_preset_zit"]
-    tags = tag_cu130("zit")
+    tags = tag_cu130("zit-bf16")
 }
 
 target "flux-13-0" {
     inherits = ["_cu130", "_preset_flux"]
-    tags = tag_cu130("flux")
+    tags = tag_cu130("flux2-fp8")
 }
 
 target "qwen-13-0" {
     inherits = ["_cu130", "_preset_qwen"]
-    tags = tag_cu130("qwen")
+    tags = tag_cu130("qwen-image-fp8")
 }
 
 target "ltx-13-0" {
     inherits = ["_cu130", "_preset_ltx"]
-    tags = tag_cu130("ltx")
+    tags = tag_cu130("ltx-2b")
 }
 
 target "wan-13-0" {
     inherits = ["_cu130", "_preset_wan"]
-    tags = tag_cu130("wan")
+    tags = tag_cu130("wan22-i2v-fp8")
 }
