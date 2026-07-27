@@ -13,6 +13,11 @@ ARG TORCH_VERSION
 ARG TORCHVISION_VERSION=0.23.0
 ARG CUDA_VERSION
 ARG SKIP_CUSTOM_NODES
+# ComfyUI release tag to check out. Pinning makes it obvious which version a
+# given image shipped, and bumping this value invalidates the clone layer's
+# build cache so a rebuild actually picks the new version up. Set to "master"
+# to track the tip instead.
+ARG COMFYUI_VERSION=v0.28.3
 # Comma-separated list of presets to download into the model mount at runtime.
 ARG DEFAULT_PRESET_DOWNLOAD=""
 # Selects a bundled workflow preset to bake into the image. When non-empty,
@@ -91,12 +96,14 @@ RUN pip install --no-cache-dir -U \
     numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml \
     triton
 
-# Install the PyTorch stack. TORCH_VERSION="nightly" triggers the nightly
-# wheel index (used for cu130 / Blackwell sm_120 because torch 2.10.0 stable's
-# bundled cuBLAS has a known sm_120 CUBLAS_STATUS_INVALID_VALUE bug). All
-# other versions install pinned wheels from the stable index. Either way, the
-# constraints file is generated from the *actually installed* versions so the
-# downstream custom-node installs don't accidentally pull a different stack.
+# Install the PyTorch stack. TORCH_VERSION="nightly" triggers the nightly wheel
+# index; every other value installs pinned wheels from the stable index. All
+# targets including cu130 are pinned today -- the nightly path is kept as an
+# escape hatch for the next time a stable wheel is broken on new hardware (it
+# was used for cu130 while torch 2.10.0's bundled cuBLAS mishandled sm_120).
+# Either way, the constraints file is generated from the *actually installed*
+# versions so the downstream custom-node installs don't accidentally pull a
+# different stack.
 RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
         pip install --no-cache-dir --pre \
             torch torchvision torchaudio \
@@ -119,6 +126,8 @@ RUN python -c "import torch, torchvision, torchaudio; \
 # Install ComfyUI and ComfyUI Manager
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git && \
     cd ComfyUI && \
+    git checkout "${COMFYUI_VERSION}" && \
+    echo "ComfyUI pinned to ${COMFYUI_VERSION} ($(git rev-parse --short HEAD))" && \
     pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt && \
     git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/ComfyUI-Manager && \
     cd custom_nodes/ComfyUI-Manager && \
@@ -288,9 +297,11 @@ RUN set -e; \
     esac
 
 # Welcome Message
+# The greeting text lives inside meshive.txt (blank separator line and
+# trailing newline included) so the banner does not depend on `echo -e`
+# escape handling, which is shell-dependent and was collapsing the newline.
 COPY logo/meshive.txt /etc/meshive.txt
 RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
-RUN echo 'echo -e "\nNice to meet you and We are Meshive administrator, Thank you."' >> /root/.bashrc
 
 # Set entrypoint to the start script
 CMD ["/start.sh"]

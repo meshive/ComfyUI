@@ -11,17 +11,30 @@ variable "TORCH_VERSION" {
 variable "TORCHVISION_VERSION" {
     default = "0.23.0"
 }
-# Blackwell (RTX 5090, RTX PRO 5000/6000) cu130 targets ship on PyTorch nightly.
-# torch 2.10.0 stable cu130 wheel ships a cuBLAS build with a known sm_120
-# CUBLAS_STATUS_INVALID_VALUE bug that breaks even simple GEMMs; nightly ships a
-# newer bundled cuBLAS that supports sm_120. The "nightly" sentinel triggers
-# the nightly install path in the Dockerfile; the actual installed version is
-# captured at build time into the constraints file.
+# Blackwell (RTX 5090, RTX PRO 5000/6000) cu130 targets. These used to track
+# PyTorch nightly because the torch 2.10.0 stable cu130 wheel shipped a cuBLAS
+# build with a known sm_120 CUBLAS_STATUS_INVALID_VALUE bug that broke even
+# simple GEMMs. Stable releases past 2.10.0 are now on the cu130 index, so we
+# pin instead: nightly made every rebuild a different torch, which made any
+# regression impossible to reproduce.
+#
+# 2.11.0 is the ceiling, not the newest stable. torch/torchvision go higher
+# (2.13.0 / 0.28.0) but torchaudio -- which ComfyUI's requirements.txt pulls in
+# -- has no cu130 wheel above 2.11.0, and the Dockerfile installs torchaudio at
+# ${TORCH_VERSION}. Raising torch past 2.11.0 therefore requires decoupling the
+# torchaudio pin first. The "nightly" sentinel still works if it is ever needed
+# again.
 variable "TORCH_VERSION_CU130" {
-    default = "nightly"
+    default = "2.11.0"
 }
 variable "TORCHVISION_VERSION_CU130" {
-    default = "nightly"
+    default = "0.26.0"
+}
+
+# ComfyUI release tag baked into every target. Bump this to ship a newer
+# ComfyUI; "master" tracks the tip instead of a release.
+variable "COMFYUI_VERSION" {
+    default = "v0.28.3"
 }
 
 variable "EXTRA_TAG" {
@@ -33,11 +46,22 @@ function "tag" {
     result = ["${DOCKERHUB_REPO_NAME}:${tag}-torch${TORCH_VERSION}-${cuda}${EXTRA_TAG}"]
 }
 
-# Tag helper for cu130 targets. Uses the user-facing variant name
-# (e.g. "flux1-schnell", "wan22-i2v-fp8") as the bare tag.
+# Tag helper for the cu130 preset bundles. Uses the user-facing variant name
+# (e.g. "flux1-schnell", "wan22-i2v-fp8") as the bare tag, deliberately without
+# a version suffix: these are product names people pull by.
 function "tag_cu130" {
     params = [variant]
     result = ["${DOCKERHUB_REPO_NAME}:${variant}${EXTRA_TAG}"]
+}
+
+# Tag helper for the cu130 base/slim images. Mirrors the cu12.x `tag` scheme
+# (e.g. "base-torch2.8.0-cu128") but reads TORCH_VERSION_CU130, since the
+# global TORCH_VERSION does not apply to cu130 targets. Keeping the version in
+# the tag means bumping torch publishes a new tag instead of silently
+# overwriting the previous one.
+function "tag_cu130_base" {
+    params = [name]
+    result = ["${DOCKERHUB_REPO_NAME}:${name}-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
 }
 
 target "_common" {
@@ -47,6 +71,7 @@ target "_common" {
         PYTHON_VERSION     = PYTHON_VERSION
         TORCH_VERSION      = TORCH_VERSION
         TORCHVISION_VERSION = TORCHVISION_VERSION
+        COMFYUI_VERSION    = COMFYUI_VERSION
     }
 }
 
@@ -93,7 +118,7 @@ target "_cu129" {
 target "_cu130" {
     inherits = ["_common"]
     args = {
-        BASE_IMAGE          = "nvidia/cuda:13.0.0-devel-ubuntu24.04"
+        BASE_IMAGE          = "nvidia/cuda:13.0.3-devel-ubuntu24.04"
         CUDA_VERSION        = "cu130"
         TORCH_VERSION       = TORCH_VERSION_CU130
         TORCHVISION_VERSION = TORCHVISION_VERSION_CU130
@@ -156,7 +181,7 @@ target "base-12-9" {
 
 target "base-13-0" {
     inherits = ["_cu130"]
-    tags = tag_cu130("base-cu130")
+    tags = tag_cu130_base("base")
 }
 
 target "slim-12-4" {
@@ -186,7 +211,7 @@ target "slim-12-9" {
 
 target "slim-13-0" {
     inherits = ["_cu130", "_no_custom_nodes"]
-    tags = tag_cu130("slim-cu130")
+    tags = tag_cu130_base("slim")
 }
 
 # Blackwell-ready (cu130) workflow preset bundles. Each image ships with the
