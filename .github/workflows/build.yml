@@ -1,9 +1,12 @@
 name: Build and Push Docker Images
 
+# 수동 실행 전용. 예전에는 8시간마다 도는 schedule 이 있었는데, 이 워크플로는 한 번도 성공한 적이
+# 없으면서(fork 라 Actions 미활성, 실행 이력 0, DOCKER_HUB 변수/시크릿 미설정) Actions 가 켜지거나
+# fork 를 detach 하는 순간 기본 브랜치에서 13개 라이브 태그를 무인 갱신하는 지뢰였다.
+# 애초에 ubuntu-latest 러너는 정리해도 ~45-60GB 라 20GB 급 이미지를 빌드할 수 없다 — 현행 이미지들은
+# 전부 로컬 수동 빌드(docker buildx bake) 산물이다.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 */8 * * *"
 
 jobs:
   bake:

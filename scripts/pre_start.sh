@@ -9,50 +9,24 @@ echo "$TZ" | sudo tee /etc/timezone > /dev/null
 sudo ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
 sudo dpkg-reconfigure -f noninteractive tzdata
 
-# Update VIRTUAL_ENV paths in all text files under /workspace/venv/bin
-update_venv_paths() {
-    local bin_dir="/workspace/venv/bin"
-    echo "Updating '/venv' to '/workspace/venv' in all text files under '$bin_dir'..."
-
-    find "$bin_dir" -type f | while read -r file; do
-        if file "$file" | grep -q "text"; then
-            # VIRTUAL_ENV='/venv' → VIRTUAL_ENV='/workspace/venv'
-            sed -i "s|VIRTUAL_ENV='/venv'|VIRTUAL_ENV='/workspace/venv'|g" "$file"
-            
-            # VIRTUAL_ENV '/venv' → VIRTUAL_ENV '/workspace/venv'
-            sed -i "s|VIRTUAL_ENV '/venv'|VIRTUAL_ENV '/workspace/venv'|g" "$file"
-            
-            # #!/venv/bin/python → #!/workspace/venv/bin/python
-            sed -i "s|#!/venv/bin/python|#!/workspace/venv/bin/python|g" "$file"
-
-            # Uncomment to debug
-            # echo "Updated: $file"
-        fi
-    done
-}
-
-echo "**** syncing venv to workspace, please wait. This could take a while on first startup! ****"
-if [ -d /venv ]; then
-    IMAGE_STACK_ID="$(cat /venv/.pytorch-stack-id 2>/dev/null || true)"
-    WORKSPACE_STACK_ID="$(cat /workspace/venv/.pytorch-stack-id 2>/dev/null || true)"
-
-    if [ -d /workspace/venv ] && [ -n "$IMAGE_STACK_ID" ] && [ "$WORKSPACE_STACK_ID" != "$IMAGE_STACK_ID" ]; then
-        echo "**** workspace venv PyTorch stack mismatch; replacing /workspace/venv ****"
-        echo "**** image stack: $IMAGE_STACK_ID ****"
-        echo "**** workspace stack: ${WORKSPACE_STACK_ID:-missing} ****"
-        rm -rf /workspace/venv
-    fi
-
-    # When the PyTorch stack matches, /workspace/venv may contain extra packages
-    # the user installed at runtime; -u (update-only) preserves them. When the
-    # stack mismatches, /workspace/venv was just wiped above, so this still
-    # performs a full copy into an empty target.
-    if rsync -au /venv/ /workspace/venv/ && rm -rf /venv; then
-        update_venv_paths
-    fi
-else
-    echo "Skip: /venv does not exist."
-fi
+# venv 와 앱 트리는 이제 이미지가 최종 위치에 갖고 있다 — 런타임 복사가 없다.
+#
+# 예전에는 여기서 /venv(12.18GiB) 를 /workspace/venv 로, /ComfyUI 를 /workspace/ComfyUI 로 rsync 했다.
+# RunPod 에서는 /workspace 가 영구 네트워크 볼륨이라 "이미지 → 볼륨" 이동으로 말이 됐지만, 우리 K8s pod
+# 에서는 /workspace 자체가 마운트가 아니고 그 하위 10개 경로(models 8종·output·user/default/workflows)만
+# LV 다. 그래서 복사본 13.56GiB 가 통째로 컨테이너 쓰기 레이어(= system storage)에 쌓였고, 매 기동마다
+# 30초를 썼다. 지금은 Dockerfile 이 venv 를 /venv 에, 앱 트리를 /workspace/ComfyUI 에 바로 만든다.
+#
+# venv 를 /workspace 로 옮기지 않은 이유: /venv 는 어떤 볼륨 마운트에도 가려질 수 없다.
+# 앱 트리는 models/output/workflows 마운트의 부모여야 해서 /workspace/ComfyUI 에 있어야만 한다.
+#
+# 아래는 그 레이아웃이 깨졌을 때 원인을 남기는 진단 로그다. exit 하지 않는다 — start.sh 는 `set -e` 이고
+# Jupyter/code-server/SSH 기동이 이 스크립트 뒤에 있어서, 여기서 죽으면 유저가 pod 에 접근할 수단이
+# 전혀 없는 채로 CrashLoopBackOff 가 되고 GPU 과금만 계속된다. 열화된 채로 뜨는 편이 낫다.
+[ -x /venv/bin/python ] || \
+    echo "**** WARN: /venv/bin/python missing — image layout broken ****" >&2
+[ -f /workspace/ComfyUI/main.py ] || \
+    echo "**** WARN: /workspace/ComfyUI shadowed by a volume mount — this image bakes the app tree there ****" >&2
 
 echo "**** syncing ComfyUI to workspace, please wait ****"
 if [ -d /ComfyUI ]; then
@@ -62,9 +36,11 @@ if [ -d /ComfyUI ]; then
         echo "**** Excluding existing output folder ****"
     fi
 
-    # Sync the image's ComfyUI tree (app code, custom_nodes,
-    # user/default/workflows, etc.) into the workspace. Baked models under
-    # /ComfyUI/models stay in the image layer and are referenced directly.
+    # 앱 코드는 이제 이미지가 /workspace/ComfyUI 에 갖고 있으므로, 여기 남는 건 사실상
+    # user/default/workflows 의 번들 예제(수 MB)뿐이다. 이건 계속 런타임 복사여야 한다 —
+    # base 변형에서 그 경로는 config LV 마운트라, 예제가 LV 위에 착지해야 유저에게 보인다
+    # (이미지에 구우면 마운트가 가려버린다). pre-baked 변형은 마운트가 없어 어느 쪽이든 보인다.
+    # baked 모델은 /ComfyUI/models 에 그대로 두고 extra_model_paths.yaml 로 참조한다.
     rsync -au --remove-source-files --exclude=/models/ $EXCLUDE /ComfyUI/ /workspace/ComfyUI/
 
     # Clean up emptied source dirs but keep /ComfyUI/models intact for image

@@ -46,9 +46,16 @@ function "tag" {
     result = ["${DOCKERHUB_REPO_NAME}:${tag}-torch${TORCH_VERSION}-${cuda}${EXTRA_TAG}"]
 }
 
-# Tag helper for the cu130 preset bundles. Uses the user-facing variant name
-# (e.g. "flux1-schnell", "wan22-i2v-fp8") as the bare tag, deliberately without
-# a version suffix: these are product names people pull by.
+# Tag helper for the cu130 preset bundles. Uses the user-facing variant name as
+# the bare tag, deliberately without a version suffix: these are product names
+# people pull by.
+#
+# 이름은 반드시 DB `k8s_template.image` 가 참조하는 문자열과 일치해야 한다. 여기서 만든 태그를
+# 템플릿이 안 가리키면 아무리 빌드해도 유저에게 반영되지 않는다. 실제로 zit/flux/wan 세 개가
+# 그렇게 어긋나 있었고(bake 는 zit-bf16/flux1-schnell/wan22-i2v-fp8 를 만드는데 템플릿은
+# *-torchnightly-cu130 을 가리켜, 그 이름의 이미지는 Docker Hub 에 한 번도 올라간 적이 없다)
+# 아래에서 템플릿 쪽 이름으로 맞췄다. "torchnightly" 는 nightly 를 쓰던 시절의 흔적이라 지금은
+# 부정확하지만, 이름을 바꾸려면 템플릿 image 갱신(시드+테스트+DB 3종)을 함께 해야 하므로 별건이다.
 function "tag_cu130" {
     params = [variant]
     result = ["${DOCKERHUB_REPO_NAME}:${variant}${EXTRA_TAG}"]
@@ -216,16 +223,16 @@ target "slim-13-0" {
 
 # Blackwell-ready (cu130) workflow preset bundles. Each image ships with the
 # matching auto-load extension and a pre-baked model set. The tag uses the
-# user-facing model variant name (e.g. "flux2-fp8") with BUILD_TIMESTAMP
-# suffix so multiple build attempts get distinct tags.
+# user-facing model variant name. RC 빌드처럼 라이브 태그를 건드리지 않고 올리고 싶으면
+# EXTRA_TAG 환경변수로 접미사를 붙인다 (예: EXTRA_TAG=-rc1 docker buildx bake --push ltx-13-0).
 target "zit-13-0" {
     inherits = ["_cu130", "_preset_zit"]
-    tags = tag_cu130("zit-bf16")
+    tags = tag_cu130("zit-torchnightly-cu130")
 }
 
 target "flux-13-0" {
     inherits = ["_cu130", "_preset_flux"]
-    tags = tag_cu130("flux1-schnell")
+    tags = tag_cu130("flux-torchnightly-cu130")
 }
 
 target "qwen-13-0" {
@@ -240,5 +247,5 @@ target "ltx-13-0" {
 
 target "wan-13-0" {
     inherits = ["_cu130", "_preset_wan"]
-    tags = tag_cu130("wan22-i2v-fp8")
+    tags = tag_cu130("wan-torchnightly-cu130")
 }
