@@ -3,7 +3,7 @@
 export PYTHONUNBUFFERED=1
 set -o pipefail
 
-source /workspace/venv/bin/activate
+source /venv/bin/activate
 cd /workspace/ComfyUI
 
 mkdir -p /workspace/logs /workspace/ComfyUI/user

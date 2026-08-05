@@ -12,12 +12,15 @@ start_nginx() {
 }
 
 dump_startup_logs() {
+    # $? 는 함수 진입 직후에만 트랩을 유발한 종료 코드를 담는다. 아래 중복 방지 블록의
+    # 대입문 뒤에서 읽으면 그 대입의 결과(항상 0)를 잡아 실패가 전부 "status 0" 으로 찍힌다.
+    local status=$?
+
     if [ "${STARTUP_LOGS_DUMPED:-0}" = "1" ]; then
         return
     fi
     STARTUP_LOGS_DUMPED=1
 
-    local status=$?
     echo "**** start.sh exiting at $(date -Is) with status ${status} ****"
     if [ -f /workspace/logs/comfyui_3000.log ]; then
         echo "**** Last 200 lines of /workspace/logs/comfyui_3000.log ****"
@@ -214,7 +217,21 @@ configure_model_paths() {
     fi
 
     if [ -z "$target_models" ]; then
-        echo '[Auto-Mount] 경고: 모델 마운트 경로를 찾지 못했습니다.'
+        # 이미지 내장 모델이 없는 변형(base/slim). 앱 트리를 /workspace/ComfyUI 에 굽게 되면서
+        # /ComfyUI 자체가 생기지 않으므로 여기로 떨어진다. 이 경우 ComfyUI 네이티브 경로
+        # (/workspace/ComfyUI/models/*)가 곧 LV 마운트 지점이라 extra_model_paths.yaml 없이
+        # 그대로 동작한다 — 마운트되지 않는 role(configs·clip·clip_vision·audio_encoders·
+        # model_patches)도 folder_paths 가 네이티브로 등록하므로 잃는 기능이 없다.
+        #
+        # MODEL_MOUNT_PATH 를 비워두면 안 된다: ALLOW_PRESET_DOWNLOAD_WITHOUT_MODEL_MOUNT=true 로
+        # 켰을 때 download_model_presets() 가 마운트가 아닌 /workspace/models 로 떨어져 수십 GB 를
+        # 시스템 스토리지에 받는다. (다만 그 함수의 tmp_dir=$models_root/.tmp 는 8개 role 밖이라
+        # 여전히 ephemeral 이다 — 프리셋 다운로드를 실제로 쓰게 되면 PRESET_TMP_DIR 을 마운트된
+        # 경로로 지정할 것.)
+        echo '[Auto-Mount] 이미지 내장 모델 없음 — ComfyUI 네이티브 경로 사용'
+        MODEL_MOUNT_PATH="/workspace/ComfyUI/models"
+        export MODEL_MOUNT_PATH
+        ensure_model_dirs "$MODEL_MOUNT_PATH"
         return
     fi
 

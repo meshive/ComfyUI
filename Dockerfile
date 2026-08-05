@@ -83,7 +83,11 @@ ENV PATH="/root/.local/bin/:$PATH"
 # Install Python and create virtual environment
 RUN uv python install ${PYTHON_VERSION} --default --preview && \
     uv venv --seed /venv
-ENV PATH="/workspace/venv/bin:/venv/bin:$PATH"
+# venv 는 /venv 에 영구히 둔다. 예전에는 pre_start.sh 가 매 기동마다 /workspace/venv 로 rsync 복사했고
+# PATH 도 그쪽을 먼저 봤는데, /workspace 는 K8s pod 에서 마운트가 아니라 그 복사본(12.18GiB)이 통째로
+# 컨테이너 쓰기 레이어(ephemeral)에 쌓였다. 복사를 없앤 지금 /workspace/venv 는 존재하지 않으므로
+# PATH 에서도 빼야 한다 — 남겨두면 유저가 /workspace 에 venv 를 만드는 순간 /venv 를 가로챈다.
+ENV PATH="/venv/bin:$PATH"
 
 # Install essential Python packages and dependencies. triton is required by
 # many ComfyUI custom nodes (xformers, attention kernels) on CUDA wheels, so we
@@ -123,9 +127,13 @@ RUN python -c "import torch, torchvision, torchaudio; \
     open('/pytorch-constraints.txt', 'w').write( \
         f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')"
 
-# Install ComfyUI and ComfyUI Manager
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git && \
-    cd ComfyUI && \
+# Install ComfyUI and ComfyUI Manager.
+# 앱 트리를 최종 위치인 /workspace/ComfyUI 에 바로 만든다. 예전에는 /ComfyUI 에 만들고 pre_start.sh 가
+# 매 기동마다 rsync 로 옮겼는데, /workspace 자체는 마운트가 아니라 그 1.38GiB 가 ephemeral 에 쌓였다.
+# models/ 하위 8개 role·output·user/default/workflows 는 런타임에 LV 로 덮이지만 그건 의도된 동작이고,
+# 나머지(comfy/, custom_nodes/, main.py 등)는 이미지 레이어에 남아 쓰기 레이어를 먹지 않는다.
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI && \
+    cd /workspace/ComfyUI && \
     git checkout "${COMFYUI_VERSION}" && \
     echo "ComfyUI pinned to ${COMFYUI_VERSION} ($(git rev-parse --short HEAD))" && \
     pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt && \
@@ -136,13 +144,20 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git && \
 COPY custom_nodes.txt /custom_nodes.txt
 
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
-        cd /ComfyUI/custom_nodes && \
+        cd /workspace/ComfyUI/custom_nodes && \
         xargs -n 1 git clone --recursive < /custom_nodes.txt && \
-        find /ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
-        find /ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
+        find /workspace/ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
+        find /workspace/ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
     else \
         echo "Skipping custom nodes installation because SKIP_CUSTOM_NODES is set"; \
-    fi
+    fi && \
+    # 빌드 타임 pip 캐시 제거(2.82GB). 위 pip 은 전부 --no-cache-dir 이지만 custom node 의 install.py 가
+    # 서브프로세스로 부르는 pip 은 그걸 상속하지 않아 여기서만 쌓인다 (예: ComfyUI-Frame-Interpolation
+    # 의 os.system("... -m pip install cupy ...")). 같은 RUN 이어야 레이어에 안 남고, `fi` 뒤여야
+    # SKIP_CUSTOM_NODES 인 slim-* 타겟에서도 실행된다. `|| true` 를 붙이면 안 된다 —
+    # `A || true && C` 는 `(A||true) && C` 라 위 if 블록의 실패까지 삼켜 빌드가 조용히 성공한다.
+    echo "[build] pruning pip cache: ${PIP_CACHE_DIR}" && \
+    rm -rf "${PIP_CACHE_DIR:?}"
 
 # Custom node dependencies may pull a different PyTorch wheel from PyPI.
 # Re-assert the CUDA-specific stack after those installs. Uses the same
@@ -158,8 +173,9 @@ RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
             torchaudio==${TORCH_VERSION} \
             --index-url "https://download.pytorch.org/whl/${CUDA_VERSION}"; \
     fi && \
-    # Re-capture installed versions and update the stack-id with the resolved
-    # torch version so pre_start.sh can detect mismatches with workspace venvs.
+    # Re-capture installed versions and update the stack-id with the resolved torch version.
+    # 참고: 이 stack-id 를 읽던 pre_start.sh 의 workspace-venv 불일치 검사는 제거됐다
+    # (venv 가 /venv 에 고정돼 불일치가 성립하지 않는다). 지금은 진단용 기록일 뿐 소비자가 없다.
     python -c "import torch, torchvision, torchaudio; \
         open('/pytorch-constraints.txt', 'w').write( \
             f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')" && \
@@ -170,8 +186,10 @@ RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
 # Install Runpod CLI
 #RUN wget -qO- cli.runpod.net | sudo bash
 
-# Install code-server
-RUN curl -fsSL https://code-server.dev/install.sh | sh
+# Install code-server. 설치기가 남기는 .deb(195MB)는 이미지에 굳을 이유가 없다 —
+# 같은 RUN 에서 지워야 레이어에 안 남는다.
+RUN curl -fsSL https://code-server.dev/install.sh | sh && \
+    rm -rf /root/.cache/code-server
 
 EXPOSE 22 3000 8080 8888
 
@@ -195,9 +213,11 @@ COPY --chmod=755 scripts/download_presets.sh /
 COPY --chmod=755 scripts/install_custom_nodes.sh /
 COPY --chmod=755 scripts/ensure_pytorch_stack.sh /
 
-# Bake workflow templates into the image so they appear in the user's
-# ComfyUI workflow browser on first launch (pre_start.sh rsyncs /ComfyUI
-# into /workspace/ComfyUI on first boot, preserving the user/ tree).
+# Bake workflow templates into the image so they appear in the user's ComfyUI
+# workflow browser on first launch. 스테이징 경로(/ComfyUI)에 두고 pre_start.sh 가
+# /workspace/ComfyUI 로 rsync 한다 — 앱 트리와 달리 이쪽은 계속 런타임 복사다.
+# base 변형에서는 그 경로가 config LV 마운트라 복사본이 LV 에 착지해야 하고(수 MB),
+# pre-baked 변형에서는 마운트가 없어 그대로 노출된다. 둘 다 이 rsync 에 의존한다.
 COPY workflows/ /ComfyUI/user/default/workflows/
 
 # Stage frontend-only custom extensions (e.g. zit-autoload). Activated below
@@ -206,14 +226,16 @@ COPY workflows/ /ComfyUI/user/default/workflows/
 COPY custom_extensions/ /custom_extensions/
 
 # Install the matching auto-load extension when a preset is requested.
-# /workspace/models is a runtime volume mount, so baked files live under
-# /ComfyUI/models/ which pre_start.sh layers over the user's mount on first boot.
+# 확장은 앱 트리(/workspace/ComfyUI/custom_nodes)로 들어간다 — custom_nodes 는 마운트가 아니다.
+# 반면 baked 모델은 아래에서 /ComfyUI/models/ 에 남긴다: /workspace/ComfyUI/models/* 의 8개 role 은
+# 런타임에 LV 로 덮이므로 거기 두면 shadow 되어 사라진다. start.sh 의 configure_model_paths() 가
+# /ComfyUI/models 를 찾아 extra_model_paths.yaml 로 노출시킨다.
 RUN if [ -n "$BAKE_PRESET" ]; then \
         if [ ! -d "/custom_extensions/${BAKE_PRESET}-autoload" ]; then \
             echo "Unknown BAKE_PRESET=${BAKE_PRESET} (no /custom_extensions/${BAKE_PRESET}-autoload)" >&2; \
             exit 1; \
         fi; \
-        cp -r "/custom_extensions/${BAKE_PRESET}-autoload" "/ComfyUI/custom_nodes/${BAKE_PRESET}-autoload"; \
+        cp -r "/custom_extensions/${BAKE_PRESET}-autoload" "/workspace/ComfyUI/custom_nodes/${BAKE_PRESET}-autoload"; \
     fi && \
     rm -rf /custom_extensions
 

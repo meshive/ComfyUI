@@ -1,6 +1,6 @@
 [![Build and Push Docker Images](https://github.com/somb1/ComfyUI-Docker/actions/workflows/build.yml/badge.svg)](https://github.com/somb1/ComfyUI-Docker/actions/workflows/build.yml)
 
-> 🔄 **Auto-updated every 8 hours** to always include the latest version.
+> 🔄 **Built on demand** — images are published by a manual `docker buildx bake` run.
 
 > 💬 Feedback & Issues → [GitHub Issues](https://github.com/somb1/ComfyUI-Docker/issues)
 
