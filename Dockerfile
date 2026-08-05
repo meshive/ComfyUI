@@ -215,9 +215,18 @@ COPY --chmod=755 scripts/ensure_pytorch_stack.sh /
 
 # Bake workflow templates into the image so they appear in the user's ComfyUI
 # workflow browser on first launch. 스테이징 경로(/ComfyUI)에 두고 pre_start.sh 가
-# /workspace/ComfyUI 로 rsync 한다 — 앱 트리와 달리 이쪽은 계속 런타임 복사다.
-# base 변형에서는 그 경로가 config LV 마운트라 복사본이 LV 에 착지해야 하고(수 MB),
-# pre-baked 변형에서는 마운트가 없어 그대로 노출된다. 둘 다 이 rsync 에 의존한다.
+# 런타임에 /workspace/ComfyUI 로 옮긴다 — base 변형에서는 그 경로가 config LV 마운트라
+# 예제가 LV 위에 착지해야 유저에게 보이고(이미지에 구우면 마운트가 가려버린다),
+# pre-baked 변형에서는 마운트가 없어 어느 쪽이든 보인다.
+#
+# ⚠️ 옮기는 주체는 **rsync 가 아니라 pre_start.sh 의 전용 시드 블록**이다 (rsync 는 이
+#    서브트리를 명시적으로 제외한다). 여기 아래 폴더 구조는 pod 에 그대로 재현되지 않는다 —
+#    JSON 만 뽑아 감시 루트 직하에 **평탄하게** 놓고 `.meshive/seeded/` 에 지문 마커를
+#    남긴다. 디렉토리째 놓으면 harvester 가 폴더 하나를 유저 자산 하나로 수확해 버리고
+#    (감시 루트 직하 엔트리 = 자산 1개), 그건 시드 마커로 억제할 수 없기 때문이다.
+#    → 사유·계약은 pre_start.sh 의 해당 블록 주석 참조.
+#    예제를 추가할 때: basename 이 **전역 유일**해야 한다 (평탄화로 폴더 이름 공간이
+#    사라진다). 깊이는 자유 — pre_start.sh 가 `find` 로 훑는다.
 COPY workflows/ /ComfyUI/user/default/workflows/
 
 # Stage frontend-only custom extensions (e.g. zit-autoload). Activated below
