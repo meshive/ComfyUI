@@ -36,12 +36,121 @@ if [ -d /ComfyUI ]; then
         echo "**** Excluding existing output folder ****"
     fi
 
-    # 앱 코드는 이제 이미지가 /workspace/ComfyUI 에 갖고 있으므로, 여기 남는 건 사실상
-    # user/default/workflows 의 번들 예제(수 MB)뿐이다. 이건 계속 런타임 복사여야 한다 —
-    # base 변형에서 그 경로는 config LV 마운트라, 예제가 LV 위에 착지해야 유저에게 보인다
-    # (이미지에 구우면 마운트가 가려버린다). pre-baked 변형은 마운트가 없어 어느 쪽이든 보인다.
+    # 앱 코드는 이제 이미지가 /workspace/ComfyUI 에 갖고 있으므로 여기 남는 건 사실상
+    # user/default/workflows 의 번들 예제뿐인데, 그건 아래 전용 블록이 처리한다 (이유는 거기
+    # 주석). 그래서 현재 변형들에서 이 rsync 는 사실상 no-op 이다 — 이미지 레이아웃이 다시
+    # 바뀔 때를 위한 방어로 남겨 둔다.
     # baked 모델은 /ComfyUI/models 에 그대로 두고 extra_model_paths.yaml 로 참조한다.
-    rsync -au --remove-source-files --exclude=/models/ $EXCLUDE /ComfyUI/ /workspace/ComfyUI/
+    rsync -au --remove-source-files --exclude=/models/ \
+        --exclude=/user/default/workflows/ $EXCLUDE /ComfyUI/ /workspace/ComfyUI/
+
+    # ── 번들 예제 workflow: 폴더가 아니라 **평탄한 파일**로 + 시드 마커 ────────────────
+    #
+    # 위 rsync 에서 이 서브트리만 뺀 이유: rsync 는 `flux/` 같은 디렉토리를 그대로 옮기는데,
+    # base 변형에서 이 경로는 config LV = harvester 감시 루트다. harvester 의 수확 단위는
+    # "감시 루트 직하 엔트리 1개 = 자산 1개"이고 디렉토리 자식은 서브트리 전체가 엔트리
+    # 하나다 (`harvester.py::scan_root`) → 유저 워크스페이스에 zit/flux/qwen/ltx/wan 5개의
+    # 가짜 config 자산이 생겼다 (2026-08-04 dev 실증).
+    #
+    # 그리고 그걸 막을 방법이 구조적으로 없다: 플랫폼 시드 억제(G2)는
+    # `not scan.is_dir and len(hashed) == 1` 인 단일 파일 엔트리만 대상이다
+    # (`harvester.py::_reconcile_entry`) — 디렉토리에 지문 하나를 대응시킬 수 없어서다.
+    # exclude 패턴으로 거르는 것도 답이 아니다: 유저가 고친 예제까지 영원히 제외돼 config
+    # 수확(G2)의 목적 자체가 무산된다 (`seed_k8s_templates.py` 의 config 선언 주석 참조).
+    #
+    # → 폴더당 JSON 이 어차피 1개뿐이므로 평탄하게 놓고 지문을 마커에 남긴다. 그러면 이미
+    #   검증된 단일 파일 억제 경로가 그대로 먹는다 — harvester 도 서버도 무변경.
+    #
+    # 마커 규약은 K8sCS `asset_sidecar.py::WORKFLOW_SEED_SCRIPT` 와 harvester
+    # `place_workflow_seed` 의 **미러**다 (= 이 이미지가 세 번째 writer). 드리프트 금지:
+    #   · 대상 파일이나 마커가 있으면 쓰지 않는다 — 수정뿐 아니라 **삭제도 존중**한다
+    #     (유저가 지운 예제를 재기동 rsync 가 부활시키던 기존 동작의 수정이기도 하다)
+    #   · skip 할 때도 마커는 남긴다 ("이 slug 는 이 볼륨에서 이미 고려됐다"는 뜻)
+    #   · 본문 = {"filename": ..., "sha256": <놓는 내용의 지문>}. 이 지문이
+    #     `harvester.py::_seed_hashes` 의 유일한 근거다 — 빠뜨리면 놓자마자 자산이 된다
+    #
+    # 파일 → 마커 순서(두 기존 writer 와 동일)가 안전한 이유: harvester 는 2연속 동일 지문을
+    # 요구하므로 파일이 처음 보인 사이클엔 hash 도 시드 판정도 하지 않는다. 판정은 최소
+    # 1주기(기본 30s) 뒤고 마커는 그 전에 µs 단위로 쓰인다. 순서를 뒤집으면 µs 창은
+    # 없어지지만 "마커만 있고 파일은 영영 안 놓임"이라는 영구 상태가 생긴다.
+    #
+    # slug 의 `bundled-` 접두사는 카탈로그 시드(slug = 번들 slug)와 이름 공간을 가르기
+    # 위함이다. 서버(`GET /v1/assets/workflow-seeds`)는 known 을 단순 차집합으로만 쓰므로
+    # 모르는 slug 는 무해하다.
+    #
+    # 이 블록은 어떤 경우에도 실패로 끝나지 않는다. `set -e` 자체는 자식 스크립트로 상속되지
+    # 않지만(SHELLOPTS 미export), start.sh 는 `bash /pre_start.sh` 를 `set -e` 아래에서
+    # 부르므로 **이 스크립트의 최종 exit status** 가 곧 start.sh 의 생사다. 여기서 죽으면
+    # 유저가 pod 에 접근할 수단 없이 CrashLoopBackOff + GPU 과금만 계속된다 (상단 주석과
+    # 같은 규율). `A || B && C` 는 `(A||B) && C` 이므로 조건부 실행을 || 로 엮지 않는다.
+    SEED_SRC=/ComfyUI/user/default/workflows
+    SEED_DST=/workspace/ComfyUI/user/default/workflows
+    SEED_MESHIVE_DIR="$SEED_DST/.meshive"
+    SEED_MARKER_DIR="$SEED_MESHIVE_DIR/seeded"
+
+    write_seed_marker() {
+        # 값은 전부 이미지가 굽는 파일명·지문(영숫자/`_`/`.`)이라 JSON escape 가 필요 없다.
+        # 외부 문자열이 들어오게 되면 escape 를 먼저 넣을 것.
+        local _marker=$1 _filename=$2 _sha=$3
+        printf '{"filename": "%s", "sha256": "%s"}' "$_filename" "$_sha" \
+            > "$_marker.tmp" 2>/dev/null || return 1
+        mv -f "$_marker.tmp" "$_marker" 2>/dev/null || { rm -f "$_marker.tmp"; return 1; }
+    }
+
+    if [ -d "$SEED_SRC" ] && mkdir -p "$SEED_MARKER_DIR" 2>/dev/null; then
+        # `.meshive/` 는 harvester BUILTIN_EXCLUDES 라 수확되지 않는다. 0777 은 방어적
+        # 조치다 — asset-harvester 이미지는 `USER 65534` 이고 사이드카는 주입 루트가 있을
+        # 때만 root 로 승격되므로(`asset_sidecar.py` 의 build_harvest_sidecar), root 가 만든
+        # 0755 를 남기면 실행 중 시드 도착분(`place_workflow_seed` 의 mkstemp)이 EPERM 으로
+        # 조용히 실패할 수 있다. 마운트 루트는 mount-perm init 이 이미 a+rwx 라 새 노출은 없다.
+        chmod 0777 "$SEED_MESHIVE_DIR" "$SEED_MARKER_DIR" 2>/dev/null || true
+
+        # 깊이를 고정하지 않고 `find` 로 전부 훑는다. 위 rsync 가 이 서브트리를 통째로
+        # 제외하므로, `*/*.json` 처럼 깊이를 박아 두면 나중에 `workflows/foo.json` 을
+        # 최상위에 추가한 사람의 파일이 **pod 에서 통째로 사라진다** (예전엔 rsync 가
+        # 어쨌든 날라줬다). 평탄화로 family 이름 공간이 사라지는 대가로, 서로 다른
+        # 위치의 같은 basename 은 뒤엣것이 skip 된다 — 그래서 skip 을 조용히 넘기지 않고
+        # 아래에서 반드시 로그를 남긴다. 지금은 5개 stem 이 전부 유일하다.
+        find "$SEED_SRC" -type f -name '*.json' 2>/dev/null | sort | while read -r src; do
+            base=$(basename "$src")
+            slug="bundled-${base%.json}"
+            dest="$SEED_DST/$base"
+            marker="$SEED_MARKER_DIR/$slug"
+            # 지문은 **놓는 바이트 그대로**여야 한다 (harvester 는 dest 를 통째로 sha256
+            # 한다). 어떤 정규화·재직렬화도 없이 그대로 복사하는 이유가 이것이다.
+            sha=$(sha256sum "$src" 2>/dev/null | cut -d' ' -f1)
+            if [ -z "$sha" ]; then
+                echo "**** WARN workflow seed: cannot hash $src — skipped ****" >&2
+                continue
+            fi
+
+            if [ -e "$dest" ] || [ -e "$marker" ]; then
+                if [ ! -e "$marker" ]; then
+                    write_seed_marker "$marker" "$base" "$sha" \
+                        || echo "**** WARN workflow seed: marker write failed: $slug ****" >&2
+                fi
+                # 조용히 넘기지 않는다. 정상(유저가 지웠거나 재기동)이 대부분이지만, basename
+                # 충돌로 예제 하나가 통째로 유실된 경우와 구분되는 유일한 단서가 이 로그다.
+                echo "**** workflow seed skip (exists or already seeded): $base ****"
+                continue
+            fi
+
+            # 원자적 배치: tmp 를 같은 LV 의 `.meshive/` 안에 만들어 mv 가 rename(2) 이
+            # 되게 한다. 착지 디렉토리에 만들면 rename 직전에 죽었을 때 잔재가 수확된다.
+            tmp="$SEED_MESHIVE_DIR/seed-$slug.tmp"
+            if cp "$src" "$tmp" 2>/dev/null && chmod 0666 "$tmp" 2>/dev/null \
+                    && mv -f "$tmp" "$dest" 2>/dev/null; then
+                write_seed_marker "$marker" "$base" "$sha" \
+                    || echo "**** WARN workflow seed: marker write failed: $slug ****" >&2
+                echo "**** workflow seed placed: $base ****"
+            else
+                rm -f "$tmp" 2>/dev/null || true
+                echo "**** WARN workflow seed: place failed: $base ****" >&2
+            fi
+        done   # `find | while` 는 서브셸이지만 이 루프는 밖으로 넘길 상태가 없다
+    else
+        echo "**** workflow seed: $SEED_SRC absent or marker dir not writable — skipped ****"
+    fi
 
     # Clean up emptied source dirs but keep /ComfyUI/models intact for image
     # variants that bake models there.
