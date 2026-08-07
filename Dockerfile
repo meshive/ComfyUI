@@ -239,7 +239,13 @@ COPY custom_extensions/ /custom_extensions/
 # 반면 baked 모델은 아래에서 /ComfyUI/models/ 에 남긴다: /workspace/ComfyUI/models/* 의 8개 role 은
 # 런타임에 LV 로 덮이므로 거기 두면 shadow 되어 사라진다. start.sh 의 configure_model_paths() 가
 # /ComfyUI/models 를 찾아 extra_model_paths.yaml 로 노출시킨다.
-RUN if [ -n "$BAKE_PRESET" ]; then \
+# meshive-autoload 는 **모든 변형에 설치한다.** 프리셋 전용 확장과 달리 열 대상을 빌드
+# 시점에 고정하지 않고 런타임 시드 마커(`.meshive/seeded/` 중 `bundled-` 접두사가 **아닌**
+# 것 = asset set 스타터)에서 찾으므로, base 에서는 붙인 asset set 의 workflow 를 열고
+# 프리셋에서는 그런 마커가 없어(config semantic path 미선언 → workflow-seed init 자체가
+# 안 붙는다) 조용히 no-op 이 된다 → 프리셋의 `{preset}-autoload` 와 경합하지 않는다.
+RUN cp -r /custom_extensions/meshive-autoload /workspace/ComfyUI/custom_nodes/meshive-autoload && \
+    if [ -n "$BAKE_PRESET" ]; then \
         if [ ! -d "/custom_extensions/${BAKE_PRESET}-autoload" ]; then \
             echo "Unknown BAKE_PRESET=${BAKE_PRESET} (no /custom_extensions/${BAKE_PRESET}-autoload)" >&2; \
             exit 1; \
