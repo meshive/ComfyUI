@@ -33,8 +33,16 @@ variable "TORCHVISION_VERSION_CU130" {
 
 # ComfyUI release tag baked into every target. Bump this to ship a newer
 # ComfyUI; "master" tracks the tip instead of a release.
+#
+# 하한이 있는 태그: **v0.30.0 미만으로 내리면 `minimax-h3` 자산 세트의 동봉 workflow 가
+# 죽는다** — H3 네이티브 노드(`comfy_extras/nodes_minimax_h3.py`, `comfy/ldm/minimax/*`)가
+# v0.30.0 에서 처음 들어왔다(0.29.x 의 `comfy_api_nodes/nodes_minimax.py` 는 유료 API 노드라
+# 로컬 가중치와 무관). 세트 정의는 WSB `scripts/seed_data/comfyui_specs/minimax-h3.json`.
+#
+# v0.28.3 → v0.31.0 (2026-08-08): requirements.txt 차이는 frontend/workflow-templates/
+# embedded-docs/comfy-kitchen/comfy-aimdo 버전 bump 뿐 — 새 의존성도, torch 제약 변경도 없다.
 variable "COMFYUI_VERSION" {
-    default = "v0.28.3"
+    default = "v0.31.0"
 }
 
 # ⚠️ **로컬 검증 전용이다. 이걸 붙인 태그를 릴리즈로 push 하지 말 것.**

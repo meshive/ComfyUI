@@ -17,7 +17,7 @@ ARG SKIP_CUSTOM_NODES
 # given image shipped, and bumping this value invalidates the clone layer's
 # build cache so a rebuild actually picks the new version up. Set to "master"
 # to track the tip instead.
-ARG COMFYUI_VERSION=v0.28.3
+ARG COMFYUI_VERSION=v0.31.0
 # Comma-separated list of presets to download into the model mount at runtime.
 ARG DEFAULT_PRESET_DOWNLOAD=""
 # Selects a bundled workflow preset to bake into the image. When non-empty,
