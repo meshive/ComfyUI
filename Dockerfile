@@ -62,6 +62,13 @@ ENV TZ=Etc/UTC
 # Set working directory
 WORKDIR /
 
+# apt 재시도 — archive.ubuntu.com 은 라운드로빈이고 그중 일부 노드가 개별 .deb 에
+# `400 Bad Request` 를 돌려주는 일이 있다. 기본값(재시도 0)이면 그 한 파일 때문에 20GB
+# 짜리 빌드 전체가 5/33 단계에서 죽는다 — 2026-08-08 에 3회 연속으로 겪었고 매번 패키지와
+# 미러 IP 가 달랐다. 재시도는 대개 다른 백엔드로 붙어 성공한다.
+RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' \
+        > /etc/apt/apt.conf.d/80-retries
+
 # Update and upgrade
 RUN apt-get update --yes && \
     apt-get upgrade --yes
