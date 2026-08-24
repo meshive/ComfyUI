@@ -27,13 +27,18 @@ import { api } from "../../scripts/api.js";
 //
 // v2 계약:
 //   · 마지막으로 고려한 slug 를 기억한다 (`meshive.autoload.v2` = {"slug": ...}).
-//   · 캔버스가 비어 있으면 → 현행 세트의 workflow 를 자동 로드 (v1 과 동일한 배려).
-//   · 캔버스에 뭔가 있고 기억한 slug == 현행 slug → 손대지 않는다 (draft 가 주인).
-//   · 캔버스에 뭔가 있고 slug 가 **다르면** → 덮지 않는다. 대신 비파괴 배너로 제안한다
+//   · **"열려 있던 작업이 있는가" 는 캔버스가 아니라 localStorage draft 로 판정한다.**
+//     ComfyUI 의 draft 복원(`Comfy.Workflow.Draft.v2:*`)은 setup 보다 늦게 끝날 수 있어
+//     캔버스를 보면 레이스다 — 복원 전의 빈 캔버스를 "새 브라우저"로 오판해 자동 로드가
+//     유저 draft 를 밀어낸다 (dev E2E 에서 실측: 150ms 그레이스로는 복원이 안 끝났다).
+//     draft 키 존재는 동기적으로 읽히므로 타이밍이 없다.
+//   · draft 가 없으면(진짜 새 브라우저) → 현행 세트의 workflow 를 자동 로드.
+//   · draft 가 있고 기억한 slug == 현행 slug → 손대지 않는다 (draft 가 주인).
+//   · draft 가 있고 slug 가 **다르면** → 덮지 않는다. 대신 비파괴 배너로 제안한다
 //     ([Open] = 새 workflow 로드, [Keep] = 현행 캔버스 유지). 어느 쪽이든 기억을 갱신해
 //     같은 질문을 반복하지 않는다. 유저 작업을 코드가 판별할 수 없으므로(복원된 옛 시드와
 //     진짜 작업물을 그래프만 보고 구분 불가) 자동 교체는 하지 않는다.
-//   · v1 플래그만 있고 v2 기억이 없는 기존 브라우저는 "미확인" 으로 본다 → 캔버스가 차
+//   · v1 플래그만 있고 v2 기억이 없는 기존 브라우저는 "미확인" 으로 본다 → draft 가
 //     있으면 배너가 한 번 뜬다 (같은 세트여도 — Keep 한 번이면 끝). 이 한 번이 바로
 //     위 사고의 유저를 구출하는 경로다.
 //
@@ -72,6 +77,16 @@ function readState() {
     } catch {
         return null;
     }
+}
+
+function hasOpenDrafts() {
+    // ComfyUI 가 복원할 미저장 작업이 이 origin 에 있는가 — **동기 판정** (복원 완료를
+    // 기다리는 타이밍 게임 금지, 위 v2 계약 참조). 신/구 프론트엔드 키 모두 커버한다.
+    for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("Comfy.Workflow.Draft.v2:")) return true;
+    }
+    return !!localStorage.getItem("workflow");  // 구 프론트엔드의 미저장 캔버스 키
 }
 
 function remember(slug) {
@@ -144,8 +159,8 @@ app.registerExtension({
                 return;
             }
 
-            const empty = (app.graph?.nodes?.length ?? 0) <= 1;
-            if (empty) {
+            if (!hasOpenDrafts()) {
+                // 복원할 draft 가 없는 진짜 새 브라우저 — 바로 열어 준다.
                 await app.loadGraphData(data);
                 remember(slug);
                 console.log("[meshive] auto-loaded seeded workflow:", filename);
