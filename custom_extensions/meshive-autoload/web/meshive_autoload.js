@@ -34,13 +34,17 @@ import { api } from "../../scripts/api.js";
 //     draft 키 존재는 동기적으로 읽히므로 타이밍이 없다.
 //   · draft 가 없으면(진짜 새 브라우저) → 현행 세트의 workflow 를 자동 로드.
 //   · draft 가 있고 기억한 slug == 현행 slug → 손대지 않는다 (draft 가 주인).
-//   · draft 가 있고 slug 가 **다르면** → 덮지 않는다. 대신 비파괴 배너로 제안한다
-//     ([Open] = 새 workflow 로드, [Keep] = 현행 캔버스 유지). 어느 쪽이든 기억을 갱신해
-//     같은 질문을 반복하지 않는다. 유저 작업을 코드가 판별할 수 없으므로(복원된 옛 시드와
-//     진짜 작업물을 그래프만 보고 구분 불가) 자동 교체는 하지 않는다.
-//   · v1 플래그만 있고 v2 기억이 없는 기존 브라우저는 "미확인" 으로 본다 → draft 가
-//     있으면 배너가 한 번 뜬다 (같은 세트여도 — Keep 한 번이면 끝). 이 한 번이 바로
-//     위 사고의 유저를 구출하는 경로다.
+//   · draft 가 있고 slug 가 **다르면**(v2 미기록 포함) → **복원이 자리잡길 기다린 뒤**
+//     새 workflow 를 자동으로 전면에 연다. 순서가 안전장치다: 복원이 끝난 다음의
+//     `loadGraphData` 는 **새 탭을 추가**할 뿐 기존 draft 를 건드리지 않는다 (복원 전에
+//     부르면 draft 저장기가 활성 워크플로를 같은 draft 슬롯에 덮어써 유저 작업이 사라진다
+//     — 위 레이스 실측과 동일 기전). 옛 draft 는 탭 스트립에 그대로 남아 한 클릭 거리다.
+//     slug 를 기억하므로 전환은 세트 교체당 **한 번** — 이후 리로드는 유저의 탭 선택이
+//     주인이다. (배너로 물어보는 안도 검토했으나, 복원 완료 후의 load 는 비파괴임이
+//     보장되므로 물을 이유가 없다 — 2026-08-24 유저 결정.)
+//   · v1 플래그만 있고 v2 기억이 없는 기존 브라우저도 같은 경로다 — 옛 세트 draft 에
+//     갇힌 사고 브라우저가 다음 방문에서 자동 구출된다. 같은 세트를 계속 쓰던
+//     브라우저는 한 번 시드 탭이 전면에 오는 비용을 치른다 (작업 draft 는 탭에 보존).
 //
 // 프리셋 이미지에서도 이 확장은 안전하다: 프리셋 템플릿은 `config` semantic path 를
 // 선언하지 않아 workflow-seed init 자체가 붙지 않는다 → `bundled-*` 마커만 존재 →
@@ -54,7 +58,11 @@ const STATE_KEY = "meshive.autoload.v2";
 const SEEDED_DIR = "workflows/.meshive/seeded";
 const WORKFLOWS_DIR = "workflows";
 const RESTORE_GRACE_MS = 150;
-const BANNER_ID = "meshive-autoload-banner";
+// draft 복원 완료 대기의 상한 — 복원은 보통 1초 안에 끝난다. 상한에 걸리는 경우는
+// draft 키는 있는데 복원이 실패한 형태(깨진 인덱스 등)뿐이고, 그때 캔버스는 비어
+// 있으므로 시드를 열어도 잃을 것이 없다.
+const RESTORE_SETTLE_TIMEOUT_MS = 5000;
+const RESTORE_SETTLE_POLL_MS = 100;
 
 async function listSeedMarkers() {
     const res = await api.fetchApi(
@@ -95,36 +103,15 @@ function remember(slug) {
     localStorage.setItem(LEGACY_FLAG, "1");
 }
 
-function showBanner(filename, onOpen) {
-    if (document.getElementById(BANNER_ID)) return;
-    const bar = document.createElement("div");
-    bar.id = BANNER_ID;
-    bar.style.cssText = [
-        "position:fixed", "top:12px", "left:50%", "transform:translateX(-50%)",
-        "z-index:10000", "display:flex", "align-items:center", "gap:12px",
-        "padding:10px 16px", "border-radius:8px", "font-size:13px",
-        "font-family:sans-serif", "color:#fff", "background:#1e293b",
-        "border:1px solid #475569", "box-shadow:0 4px 16px rgba(0,0,0,.45)",
-        "max-width:calc(100vw - 48px)",
-    ].join(";");
-    const label = document.createElement("span");
-    const stem = filename.replace(/\.json$/, "");
-    label.textContent =
-        `Your asset set changed — starter workflow "${stem}" is ready.`;
-    const openBtn = document.createElement("button");
-    openBtn.textContent = "Open";
-    openBtn.style.cssText =
-        "padding:4px 14px;border-radius:6px;border:0;cursor:pointer;" +
-        "background:#38bdf8;color:#0b1220;font-weight:600";
-    const keepBtn = document.createElement("button");
-    keepBtn.textContent = "Keep current";
-    keepBtn.style.cssText =
-        "padding:4px 12px;border-radius:6px;cursor:pointer;background:none;" +
-        "border:1px solid #64748b;color:#cbd5e1";
-    openBtn.onclick = async () => { bar.remove(); await onOpen(); };
-    keepBtn.onclick = () => bar.remove();
-    bar.append(label, openBtn, keepBtn);
-    document.body.appendChild(bar);
+async function waitForRestoreToSettle() {
+    // draft 가 있음을 안 뒤에만 부른다 — "캔버스에 뭔가 나타날 때까지"가 곧
+    // "복원이 자리잡았다"다. 상한 초과는 복원 실패(빈 캔버스)이므로 그대로 진행한다.
+    const deadline = performance.now() + RESTORE_SETTLE_TIMEOUT_MS;
+    while (performance.now() < deadline) {
+        if ((app.graph?.nodes?.length ?? 0) > 0) return true;
+        await new Promise((r) => setTimeout(r, RESTORE_SETTLE_POLL_MS));
+    }
+    return false;
 }
 
 app.registerExtension({
@@ -170,15 +157,14 @@ app.registerExtension({
             const prev = readState();
             if (prev?.slug === slug) return;  // 같은 세트 — draft 가 주인이다.
 
-            showBanner(filename, async () => {
-                await app.loadGraphData(data);
-                console.log("[meshive] opened seeded workflow via banner:",
-                            filename);
-            });
-            // 응답과 무관하게 기억한다 — Keep(또는 무시 후 이탈)이 "다시 묻지 마" 다.
-            // 배너가 떠 있는 동안 유저가 사이드바에서 직접 열어도 결과는 같다.
+            // 세트가 바뀌었다(또는 v2 미기록) — 복원이 자리잡은 **뒤에** 새 workflow 를
+            // 전면에 연다. 이 순서라야 loadGraphData 가 새 탭 추가로 끝나고 기존
+            // draft 가 보존된다 (계약 주석 참조). 기억을 먼저 갱신해, load 도중 리로드
+            // 돼도 같은 전환을 반복하지 않는다.
             remember(slug);
-            console.log("[meshive] asset set changed, offering workflow:",
+            await waitForRestoreToSettle();
+            await app.loadGraphData(data);
+            console.log("[meshive] asset set changed, opened seeded workflow:",
                         filename);
         } catch (e) {
             // 자동 로드는 편의 기능이다 — 어떤 실패도 대시보드를 막지 않는다.
