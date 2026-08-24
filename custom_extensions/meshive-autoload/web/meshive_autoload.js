@@ -157,12 +157,23 @@ app.registerExtension({
             const prev = readState();
             if (prev?.slug === slug) return;  // 같은 세트 — draft 가 주인이다.
 
-            // 세트가 바뀌었다(또는 v2 미기록) — 복원이 자리잡은 **뒤에** 새 workflow 를
-            // 전면에 연다. 이 순서라야 loadGraphData 가 새 탭 추가로 끝나고 기존
-            // draft 가 보존된다 (계약 주석 참조). 기억을 먼저 갱신해, load 도중 리로드
-            // 돼도 같은 전환을 반복하지 않는다.
+            // 세트가 바뀌었다(또는 v2 미기록) — 복원이 자리잡은 **뒤에**, **새 임시
+            // 워크플로 탭을 만들어** 그 안에 연다. 두 단계가 모두 보존의 조건이다:
+            //   · 복원 전에 load 하면 draft 저장기가 활성 워크플로를 기존 draft 슬롯에
+            //     덮어써 유저 작업이 사라진다 (dev E2E 실측 — nodes>0 직후의 load 도
+            //     탭 등록 전이라 같은 슬롯을 덮었다).
+            //   · createNewTemporary 없이 load 해도 같은 이유로 활성 탭이 제물이 된다.
+            // 순서를 지키면 기존 draft 는 탭 스트립에 그대로 남는다 (E2E: drafts 1→2,
+            // 옛 내용 보존 실측). 기억을 먼저 갱신해 load 도중 리로드돼도 반복하지 않는다.
             remember(slug);
             await waitForRestoreToSettle();
+            try {
+                await app.extensionManager?.workflow?.createNewTemporary?.();
+            } catch (e) {
+                // 구 프론트엔드(스토어 API 부재) — 활성 탭에 그대로 연다. draft 가
+                // 없던 시절의 동작과 같아 순 회귀는 아니다.
+                console.warn("[meshive] createNewTemporary unavailable:", e);
+            }
             await app.loadGraphData(data);
             console.log("[meshive] asset set changed, opened seeded workflow:",
                         filename);
