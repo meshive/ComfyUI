@@ -171,7 +171,7 @@ configure_model_paths() {
     if [ -z "$target_models" ]; then
         # 현재 모든 변형이 여기로 떨어진다 (2026-09-22 프리셋 굽기 제거 이후).
         # /ComfyUI 는 여전히 있지만(COPY workflows/ 가 거기 들어간다) /ComfyUI/models 는 없다.
-        # 이 경우 ComfyUI 네이티벌 경로
+        # 이 경우 ComfyUI 네이티브 경로
         # (/workspace/ComfyUI/models/*)가 곧 LV 마운트 지점이라 extra_model_paths.yaml 없이
         # 그대로 동작한다 — 마운트되지 않는 role(configs·clip·clip_vision·audio_encoders·
         # model_patches)도 folder_paths 가 네이티브로 등록하므로 잃는 기능이 없다.
@@ -253,7 +253,7 @@ download_model_presets &
 
 # setup_ssh 는 제거됐다 (2026-09-22). $PUBLIC_KEY 가 설정되어야만 동작했는데
 # 플랫폼 어느 코드도 그 변수를 설정하지 않아 한 번도 타지 않는 경로였다
-# (WebServerBackend/K8sControlServer/WebFrontend 전수 확인). Pod 셔임 접속은
+# (WebServerBackend/K8sControlServer/WebFrontend 전수 확인). Pod SSH 접속은
 # files/ssh/ 의 노드-로컬 exec 게이트웨이(execd -> CRI)를 쓰며 컨테이너 안의
 # sshd 와 무관하므로, 이 함수가 없어도 플랫폼 SSH 는 그대로 동작한다.
 start_jupyter
