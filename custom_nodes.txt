@@ -1,23 +1,50 @@
-https://github.com/kijai/ComfyUI-KJNodes.git
-https://github.com/kijai/ComfyUI-WanVideoWrapper.git
-https://github.com/city96/ComfyUI-GGUF.git
-https://github.com/yolain/ComfyUI-Easy-Use.git
-https://github.com/Fannovel16/ComfyUI-Frame-Interpolation.git
-https://github.com/Smirnov75/ComfyUI-mxToolkit.git
-https://github.com/pollockjj/ComfyUI-MultiGPU.git
-https://github.com/comfyanonymous/ComfyUI_TensorRT.git
-https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git
-https://github.com/receyuki/comfyui-prompt-reader-node.git
-https://github.com/cubiq/ComfyUI_essentials.git
-https://github.com/ltdrdata/ComfyUI-Impact-Pack.git
-https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git
-https://github.com/jags111/efficiency-nodes-comfyui.git
-https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git
-https://github.com/JPS-GER/ComfyUI_JPS-Nodes.git
-https://github.com/chrisgoringe/cg-use-everywhere.git
-https://github.com/crystian/ComfyUI-Crystools.git
-https://github.com/rgthree/rgthree-comfy.git
-https://github.com/alexopus/ComfyUI-Image-Saver.git
-https://github.com/jupo-ai/comfy-ex-tagcomplete.git
-https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git
-https://github.com/orssorbit/ComfyUI-wanBlockswap.git
+# ComfyUI custom node 목록. 한 줄 = "<git-url> <commit-sha>" (공백 구분).
+#
+# ⚠️ **커밋 SHA 를 반드시 함께 적는다.**
+#
+# 예전에는 URL 만 나열했고 Dockerfile 이 `xargs -n 1 git clone --recursive` 로 받았다.
+# 그러면 매 빌드가 그 시점의 upstream HEAD 를 받으므로 **같은 커밋으로 빌드해도 다른
+# 이미지가 나온다.** 대가는 2026-09-23 에 실측했다: Windows TensorRT blob 2.07GB(비압축)를
+# 지웠는데도 custom_nodes 레이어 합계가 6.000 → 7.256GB 로 오히려 늘었다. 2026-08-08 빌드
+# 이후 6주치 upstream 드리프트가 그대로 유입된 결과이고, `.git` 만 759 → 923MB 였다.
+# 회귀가 나도 어느 노드의 어느 커밋 때문인지 좁힐 방법이 없었다.
+# (docker-bake.hcl 이 torch nightly 를 버리고 핀으로 돌아선 사유와 같은 문제다 —
+#  "nightly made every rebuild a different torch, which made any regression
+#   impossible to reproduce".)
+#
+# 아래 SHA 는 2026-09-23 검증 빌드(meshive/comfyui:base-torch2.8.0-cu128)에 **실제로
+# 들어간 커밋**이다. 이미지 안에서 `git rev-parse HEAD` 로 뽑았으므로 핀과 검증된
+# 바이트가 일치한다.
+#
+# 올릴 때:
+#   1) `git ls-remote <url> HEAD` 로 upstream HEAD 확인
+#   2) 해당 줄의 SHA 만 교체
+#   3) 빌드 + GPU 검증
+#   여러 줄을 한꺼번에 올리면 회귀 원인 좁히기가 어렵다 — 나눠서 올릴 것.
+#
+# `#` 로 시작하는 줄과 빈 줄은 무시된다. SHA 를 비우면 기본 브랜치 HEAD 를 받는다
+# (재현성이 깨지므로 쓰지 말 것).
+
+https://github.com/kijai/ComfyUI-KJNodes.git                   d3cfe21625e5170126ce06fbfcfe1d88108688c3
+https://github.com/kijai/ComfyUI-WanVideoWrapper.git           088128b224242e110d3906c6750e9a3a348a659b
+https://github.com/city96/ComfyUI-GGUF.git                     6ea2651e7df66d7585f6ffee804b20e92fb38b8a
+https://github.com/yolain/ComfyUI-Easy-Use.git                 8730ffd14044ee9392db3b192646266576bc67df   # submodules
+https://github.com/Fannovel16/ComfyUI-Frame-Interpolation.git  26545cc2dd95bc3d27f056016300673bdeee78f5
+https://github.com/Smirnov75/ComfyUI-mxToolkit.git             7f7a0e584f12078a1c589645d866ae96bad0cc35
+https://github.com/pollockjj/ComfyUI-MultiGPU.git              37a73feda5804045e4f39d8c640905d62a2169d1
+https://github.com/comfyanonymous/ComfyUI_TensorRT.git         5bcc3f1e5c2424bb20bcb586e340c25ebe4a954f
+https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git         a5547db9e1d07d3318bb21e9e9c474f4c1e9c8df   # submodules
+https://github.com/receyuki/comfyui-prompt-reader-node.git     a88722ce8fe081be83d7fddb2ebe88f616b14662   # submodules
+https://github.com/cubiq/ComfyUI_essentials.git                9d9f4bedfc9f0321c19faf71855e228c93bd0dc9
+https://github.com/ltdrdata/ComfyUI-Impact-Pack.git            429d0159ad429e64d2b3916e6e7be9c22d025c3c   # submodules
+https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git         50c7b71a6a224734cc9b21963c6d1926816a97f1
+https://github.com/jags111/efficiency-nodes-comfyui.git        4579b7d6076b2870998a08f5d37883fbc8261ff2
+https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git    609f3afaa74b2f88ef9ce8d939626065e3247469
+https://github.com/JPS-GER/ComfyUI_JPS-Nodes.git               0e2a9aca02b17dde91577bfe4b65861df622dcaf
+https://github.com/chrisgoringe/cg-use-everywhere.git          50ae9f8c5d8b9538589663c90a15d4067a02969c
+https://github.com/crystian/ComfyUI-Crystools.git              2f18256c5b5063937106f29a8e0a7db3ae3869b7
+https://github.com/rgthree/rgthree-comfy.git                   2c5342a8cb0eaecaabf61435a5f37dd594c510ba
+https://github.com/alexopus/ComfyUI-Image-Saver.git            b4b349e553d0f43713fa6914708b70b296392f73
+https://github.com/jupo-ai/comfy-ex-tagcomplete.git            028631834bb99b9dc1fb98fa53307686c7e83b80
+https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git    4d907bee61e92c2e65af3bd6383a4e4d356126d1
+https://github.com/orssorbit/ComfyUI-wanBlockswap.git          5fa2ec0fa55879fe43a33e762fff91fc2c553a67

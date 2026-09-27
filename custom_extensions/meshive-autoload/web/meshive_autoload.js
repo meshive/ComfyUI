@@ -114,15 +114,54 @@ async function waitForRestoreToSettle() {
     return false;
 }
 
+const LOAD_ATTEMPTS = 2;
+const LOAD_RETRY_MS = 1000;
+
+// `app.loadGraphData` 는 실패해도 **예외를 던지지 않는다** — 프론트엔드가 에러를 삼키고 "워크플로
+// 로드가 중단되었습니다" 창만 띄운 뒤 정상 반환한다 (1.52.7 실측). 반환만 보고 성공으로 치면 실패한
+// slug 를 기억해 버리고, 다음 로드부터는 "같은 세트"로 판단해 **영영 다시 열지 않는다.** 그래서
+// 그래프가 실제로 이 workflow 로 바뀌었는지 노드(id·type)로 확인한다. 재시도는 안전망이다 —
+// 실패할 때마다 에러 창이 하나씩 뜨므로 횟수를 작게 둔다.
+async function loadVerified(data) {
+    const want = (data?.nodes ?? []).map((n) => [n.id, n.type]);
+    for (let attempt = 1; attempt <= LOAD_ATTEMPTS; attempt++) {
+        await app.loadGraphData(data);
+        if (want.every(([id, type]) => app.graph?.getNodeById?.(id)?.type === type)) return true;
+        if (attempt < LOAD_ATTEMPTS) await new Promise((r) => setTimeout(r, LOAD_RETRY_MS));
+    }
+    return false;
+}
+
 app.registerExtension({
     name: "meshive.autoload",
-    async setup() {
+    setup() {
+        // ⚠️ **setup() 을 막지 말 것 — 기다리지 않고 띄워 보낸다.**
+        // 프론트엔드는 모든 확장의 setup() 이 끝난 **뒤에** 캔버스를 등록하고 복원/기본
+        // workflow 를 로드한다. 여기서 await 하면 우리가 기다리는 바로 그 단계를 우리가 막는다:
+        // waitForRestoreToSettle 은 타임아웃까지 헛돌고, 그 뒤의 loadGraphData 는 캔버스 등록 전이라
+        // `getCanvas: canvas is null` 로 중단된다. 더 나쁜 건 그게 그래프 모델은 이미 바꾼 뒤에 터져서
+        // 검증을 통과하고, 직후 프론트엔드의 기본 workflow 로드가 그걸 덮어쓴다는 점이다 (1.52.7,
+        // 2026-09-23 로컬 실측: 새 브라우저마다 재현, 자동 열기가 한 번도 성공하지 않았다).
+        runAutoload();
+    },
+});
+
+async function runAutoload() {
         // ComfyUI 의 복원(localStorage 의 이전 workflow)이 먼저 끝나게 둔다.
         await new Promise((r) => setTimeout(r, RESTORE_GRACE_MS));
 
         try {
             const markers = await listSeedMarkers();
-            const slug = markers.find((n) => !n.startsWith("bundled-"));
+            // 정렬한 뒤 첫 번째를 고른다. ComfyUI 의 `/userdata` 는 `glob.glob()` 결과를 정렬 없이
+            // 그대로 돌려준다(app/user_manager.py, v0.37.0 에서 확인) — 즉 목록 순서는 파일시스템
+            // 순서이고 보장이 없다. 세트 하나에 워크플로가 둘 이상이면(대표 `minimax-h3` + 변형
+            // `minimax-h3--i2v`) 예전의 `find` 는 어느 쪽이든 먼저 온 것을 골랐다.
+            // 변형 slug 는 항상 `<대표>--<변형>` 이고 마커 파일명은 확장자 없는 slug 그대로라
+            // (pre_start.sh 의 `$SEED_MARKER_DIR/$slug`, K8sCS asset_sidecar.py 의 `seeded/{slug}`),
+            // 정렬하면 대표가 자기 변형보다 반드시 앞선다. 세트가 여럿이어도 첫 번째는 어느 세트의 대표다.
+            // 부수 효과가 더 중요하다: 고른 slug 가 매번 같아져 아래 `prev?.slug === slug` 비교가 안정된다.
+            // 순서가 흔들리면 리로드 때 같은 세트를 "바뀌었다"로 오인해 새 임시 탭을 또 열었다.
+            const slug = markers.filter((n) => !n.startsWith("bundled-")).sort()[0];
             if (!slug) {
                 // asset set 없이 띄운 base pod — 정상 경로다. 기억을 세우지 않아
                 // 다음 로드에서 다시 확인한다 (요청 1건, 무해).
@@ -147,10 +186,22 @@ app.registerExtension({
             }
 
             if (!hasOpenDrafts()) {
-                // 복원할 draft 가 없는 진짜 새 브라우저 — 바로 열어 준다.
-                await app.loadGraphData(data);
-                remember(slug);
-                console.log("[meshive] auto-loaded seeded workflow:", filename);
+                // 복원할 draft 가 없는 진짜 새 브라우저 — 열어 준다. 단 **바로는 아니다.**
+                // 프론트엔드 1.52.7(ComfyUI v0.37.0)에서는 setup() 150ms 시점에 캔버스가 아직
+                // 등록 전이라 loadGraphData 가 `getCanvas: canvas is null` 로 중단됐다 (2026-09-23
+                // 로컬 실측, 새 브라우저마다 재현). 에러 창은 ComfyUI-Manager 의
+                // components-manager.js 를 지목하지만 그건 loadGraphData 를 감싼 래퍼라 스택에
+                // 걸렸을 뿐이다 — 초기화가 끝난 뒤 같은 호출은 성공한다. 그래서 아래 세트 변경
+                // 경로와 똑같이 복원이 자리잡을 때까지 기다린 뒤 연다.
+                await waitForRestoreToSettle();
+                if (await loadVerified(data)) {
+                    remember(slug);
+                    console.log("[meshive] auto-loaded seeded workflow:", filename);
+                } else {
+                    // 기억을 세우지 않는다 — 다음 로드에서 다시 시도하게 둔다.
+                    console.warn("[meshive] auto-load did not take effect; will retry on next load:",
+                                 filename);
+                }
                 return;
             }
 
@@ -181,5 +232,4 @@ app.registerExtension({
             // 자동 로드는 편의 기능이다 — 어떤 실패도 대시보드를 막지 않는다.
             console.warn("[meshive] auto-load error:", e);
         }
-    },
-});
+}

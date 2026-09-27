@@ -41,8 +41,16 @@ variable "TORCHVISION_VERSION_CU130" {
 #
 # v0.28.3 → v0.31.0 (2026-08-08): requirements.txt 차이는 frontend/workflow-templates/
 # embedded-docs/comfy-kitchen/comfy-aimdo 버전 bump 뿐 — 새 의존성도, torch 제약 변경도 없다.
+#
+# v0.31.0 → v0.37.0 (2026-09-23): 성격이 같다 — frontend 1.48.7→1.52.7,
+# workflow-templates 0.11.34→0.11.66, embedded-docs 0.5.9→0.5.12, av>=16→>=17,
+# comfy-kitchen 0.2.28→0.2.35, comfy-aimdo 0.4.13→0.5.5. 새 의존성 없음, torch 제약 불변.
+# ⚠️ torchaudio 는 v0.37.0 requirements 에 **아직 있다**(미릴리스 master 에서만 밠졌다)
+#    — 위 TORCH_VERSION_CU130 의 2.11.0 상한은 이번 bump 로 풀리지 않는다.
+# COMFYUI_VERSION 은 태그 문자열에 안 들어가므로 이 bump 는 기존 태그를 덮어쓴다 —
+# 즉 seed 템플릿 행 교제가 없고, 위 TORCH_VERSION bump 런북은 해당되지 않는다.
 variable "COMFYUI_VERSION" {
-    default = "v0.31.0"
+    default = "v0.37.0"
 }
 
 # ⚠️ **로컬 검증 전용이다. 이걸 붙인 태그를 릴리즈로 push 하지 말 것.**
@@ -64,37 +72,6 @@ function "tag" {
     result = ["${DOCKERHUB_REPO_NAME}:${tag}-torch${TORCH_VERSION}-${cuda}${EXTRA_TAG}"]
 }
 
-# Tag helper for the cu130 preset bundles. Uses the user-facing variant name as
-# the bare tag, deliberately without a version suffix: these are product names
-# people pull by.
-#
-# 이름은 반드시 DB `k8s_template.image` 가 참조하는 문자열과 일치해야 한다. 여기서 만든 태그를
-# 템플릿이 안 가리키면 아무리 빌드해도 유저에게 반영되지 않는다. 실제로 zit/flux/wan 세 개가
-# 그렇게 어긋나 있었고(bake 는 zit-bf16/flux1-schnell/wan22-i2v-fp8 를 만드는데 템플릿은
-# *-torchnightly-cu130 을 가리켜, 그 이름의 이미지는 Docker Hub 에 한 번도 올라간 적이 없다)
-# 아래에서 템플릿 쪽 이름으로 맞췄다. "torchnightly" 는 nightly 를 쓰던 시절의 흔적이라 지금은
-# 부정확하지만, 이름을 바꾸려면 템플릿 image 갱신(시드+테스트+DB 3종)을 함께 해야 하므로 별건이다.
-function "tag_cu130" {
-    params = [variant]
-    result = ["${DOCKERHUB_REPO_NAME}:${variant}${EXTRA_TAG}"]
-}
-
-# Tag helper for the cu130 base/slim images. Mirrors the cu12.x `tag` scheme
-# (e.g. "base-torch2.8.0-cu128") but reads TORCH_VERSION_CU130, since the
-# global TORCH_VERSION does not apply to cu130 targets. Keeping the version in
-# the tag means bumping torch publishes a new tag instead of silently
-# overwriting the previous one.
-#
-# ── 런북: `TORCH_VERSION_CU130` (또는 `TORCH_VERSION`) 을 올릴 때 ────────────────
-# 버전이 태그에 박혀 있으므로 **새 태그가 발행된다.** 플랫폼 쪽 3건을 **같은 PR 에서**
-# 함께 하지 않으면 카탈로그에 신·구 변형이 함께 뜨고 신행에는 추천이 안 붙는다
-# (upsert 키가 (namespace, name, image) — 2026-08-05 real 장애의 형태):
-#   1. `WebServerBackend/scripts/seed_data/seed_k8s_templates.py` 의 해당 base 행
-#      `image` 를 새 태그로 갱신
-#   2. **구 이미지 문자열을 같은 파일 `RETIRED_OFFICIAL_IMAGES` 에 추가** (안 하면 구행이
-#      verified 로 남는다 — 시드의 가드 ②가 경고로 잡아 준다)
-#   3. 배포 후 `seed_k8s_templates` → `seed_open_assets` 순서로 실행 (추천은 실행 시점의
-#      official 행에만 붙으므로 순서가 뒤바뀌면 새 행이 빈 채로 남는다)
 function "tag_cu130_base" {
     params = [name]
     result = ["${DOCKERHUB_REPO_NAME}:${name}-torch${TORCH_VERSION_CU130}-cu130${EXTRA_TAG}"]
@@ -167,29 +144,6 @@ target "_no_custom_nodes" {
     }
 }
 
-# Workflow preset bundles. Each preset installs the matching auto-load
-# extension and bakes its model set into the image so startup needs no
-# downloads. Composed with a _cuXXX base.
-target "_preset_zit" {
-    args = { BAKE_PRESET = "zit" }
-}
-
-target "_preset_flux" {
-    args = { BAKE_PRESET = "flux" }
-}
-
-target "_preset_qwen" {
-    args = { BAKE_PRESET = "qwen" }
-}
-
-target "_preset_ltx" {
-    args = { BAKE_PRESET = "ltx" }
-}
-
-target "_preset_wan" {
-    args = { BAKE_PRESET = "wan" }
-}
-
 target "base-12-4" {
     inherits = ["_cu124"]
     tags = tag("base", "cu124")
@@ -248,37 +202,4 @@ target "slim-12-9" {
 target "slim-13-0" {
     inherits = ["_cu130", "_no_custom_nodes"]
     tags = tag_cu130_base("slim")
-}
-
-# Blackwell-ready (cu130) workflow preset bundles. Each image ships with the
-# matching auto-load extension and a pre-baked model set. The tag uses the
-# user-facing model variant name.
-# 로컬에서만 확인하고 버릴 빌드에는 EXTRA_TAG 로 접미사를 붙일 수 있다
-# (예: EXTRA_TAG=-local docker buildx bake ltx-13-0). **접미사 태그를 push 해서 정식으로
-# 쓰지 말 것** — 사유는 EXTRA_TAG 선언부 주석. 현재 프리셋 5종의 `-r2` 는 그 사고의
-# 잔재이고 유지 중이며(유저 커스텀 템플릿이 plain 프리셋 태그를 물고 있다), base 2종은
-# 2026-08-06 에 plain 으로 되돌렸다.
-target "zit-13-0" {
-    inherits = ["_cu130", "_preset_zit"]
-    tags = tag_cu130("zit-torchnightly-cu130")
-}
-
-target "flux-13-0" {
-    inherits = ["_cu130", "_preset_flux"]
-    tags = tag_cu130("flux-torchnightly-cu130")
-}
-
-target "qwen-13-0" {
-    inherits = ["_cu130", "_preset_qwen"]
-    tags = tag_cu130("qwen-image-fp8")
-}
-
-target "ltx-13-0" {
-    inherits = ["_cu130", "_preset_ltx"]
-    tags = tag_cu130("ltx-2b")
-}
-
-target "wan-13-0" {
-    inherits = ["_cu130", "_preset_wan"]
-    tags = tag_cu130("wan-torchnightly-cu130")
 }

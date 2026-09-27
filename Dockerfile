@@ -5,37 +5,36 @@ FROM ${BASE_IMAGE}
 # Set the shell and enable pipefail for better error handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# Set basic environment variables
-ARG PYTHON_VERSION
-ARG TORCH_VERSION
-# torchaudio must match torch exactly; torchvision uses its own
-# 0.{torch minor+15}.{patch} version line and is passed separately.
-ARG TORCHVISION_VERSION=0.23.0
-ARG CUDA_VERSION
-ARG SKIP_CUSTOM_NODES
-# ComfyUI release tag to check out. Pinning makes it obvious which version a
-# given image shipped, and bumping this value invalidates the clone layer's
-# build cache so a rebuild actually picks the new version up. Set to "master"
-# to track the tip instead.
-ARG COMFYUI_VERSION=v0.31.0
-# Comma-separated list of presets to download into the model mount at runtime.
-ARG DEFAULT_PRESET_DOWNLOAD=""
-# Selects a bundled workflow preset to bake into the image. When non-empty,
-# the matching auto-load extension and model set are both installed at build
-# time so first launch needs no downloads. One of:
-#   "" (none) | zit | flux | qwen | ltx | wan
-ARG BAKE_PRESET=""
-
-ENV TORCH_VERSION=${TORCH_VERSION}
-ENV TORCHVISION_VERSION=${TORCHVISION_VERSION}
-ENV CUDA_VERSION=${CUDA_VERSION}
-ENV PYTORCH_STACK_ID="python-${PYTHON_VERSION}-torch-${TORCH_VERSION}-torchvision-${TORCHVISION_VERSION}-${CUDA_VERSION}"
-ENV PRESET_DOWNLOAD=${DEFAULT_PRESET_DOWNLOAD}
+# ⚠️ **ARG 선언 위치가 곧 캐시 경계다. 첫 소비자 바로 위에서만 선언할 것.**
+#
+# BuildKit 은 스코프에 살아있는 **모든** build arg 를 그 아래 모든 RUN 의
+# 환경에 넣고, 그 환경이 캐시 키에 들어간다 — 그 RUN 이 arg 를 참조하든 말든,
+# bake 가 값을 넘기든 말든. 예전에는 8개를 여기 상단에 몰아 선언했고, 그래서 arg 를
+# 하나도 안 쓰는 아래 `printf` 레이어조차 히스토리에 이렇게 기록됐다:
+#   RUN |8 PYTHON_VERSION=3.13 ... SKIP_CUSTOM_NODES= ... BAKE_PRESET= /bin/bash ... printf
+# (`docker buildx bake --print base-12-8` 은 6개만 넘기는데도 8개가 전부 박힌다 —
+#  선언만 해도 들어간다는 뜻이다.)
+#
+# 대가는 2026-09-22 에 실측했다: COMFYUI_VERSION 한 줄만 올려도 그 아래 15GB 가 전부
+# 재빌드되고, base/slim/프리셋 5종이 서로 레이어를 **하나도** 공유하지 못했다
+# (cu130 7개 태그 단순합 247.50GB 중 유니크 231.69GB, base↔프리셋 공유 레이어 0개).
+#
+# 런타임에만 쓰이는 값(TORCH_VERSION 등)은 파일 **맨 아래**에서 ENV 로 굳힌다.
+# ENV 도 아래 RUN 들의 캐시 키에 들어가므로, 상단에 두면 ARG 를 내린 의미가 없다.
+# 새 ARG 를 추가할 때도 이 규칙을 지킬 것.
 
 # Set basic environment variables
 ENV SHELL=/bin/bash 
 ENV PYTHONUNBUFFERED=True 
 ENV DEBIAN_FRONTEND=noninteractive
+
+# 로그/툴 출력을 영어 UTF-8 로 고정한다. Meshive 는 글로벌 플랫폼이고 컨테이너
+# stdout 은 유저가 FE(PodBox)에서 그대로 읽는다. C.UTF-8 은 glibc 내장이라 locale-gen
+# 이 필요 없다 — 예전에 여기 있던 `echo "en_US.UTF-8 UTF-8" > /etc/locale.gen` 은
+# locale-gen 을 한 번도 호출하지 않아 실제로는 아무 locale 도 생성하지 않았고
+# LANG 도 비어 있어 컨테이너는 POSIX locale 로 돌았다. (2026-09-22 정리)
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 # Set the default workspace directory
 ENV RP_WORKSPACE=/workspace
@@ -73,8 +72,6 @@ RUN printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\n' \
 RUN apt-get update --yes && \
     apt-get upgrade --yes
 
-RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen
-
 # Install essential packages
 RUN apt-get install --yes --no-install-recommends \
         git wget curl bash nginx-light rsync sudo binutils ffmpeg lshw nano tzdata file build-essential cmake nvtop \
@@ -83,11 +80,22 @@ RUN apt-get install --yes --no-install-recommends \
     apt-get autoremove -y && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Install the UV tool from astral-sh
-ADD https://astral.sh/uv/install.sh /uv-installer.sh
+# ⚠️ 버전을 URL 에 **고정**한다. `https://astral.sh/uv/install.sh` 는 언제나 최신
+# 릴리즈를 주고 BuildKit 은 받아온 파일의 content digest 를 캐시 키에 넣으므로,
+# uv 가 릴리즈될 때마다 이 레이어와 **그 아래 전부**가 깨진다.
+# 2026-08-24 빌드가 실제로 이걸로 터졌다: 위 apt 계열 레이어는 2026-08-08 캐시를
+# 16일 만에 그대로 재사용했는데 이 ADD 에서 miss 가 나 아래 13.16GB 가 통째로
+# 재빌드됐다. 그날 바뀐 소스는 46개 레이어 중 42번째에 들어가는
+# custom_extensions/ JS 파일 하나뿐이었다.
+# 0.12.3 은 현재 배포 중인 이미지에 실제로 들어있는 바로 그 스크립트다
+# (sha256 a7e3924ea1cd06bf1518c577d635c624ae2e2db030e0fc8ff8cf426224384e17, 71225B)
+# — 즉 이 핀은 동작을 바꾸지 않는다. 올릴 때는 이 줄을 의도적으로 고쳐서 올린다.
+ADD https://astral.sh/uv/0.12.3/install.sh /uv-installer.sh
 RUN sh /uv-installer.sh && rm /uv-installer.sh
 ENV PATH="/root/.local/bin/:$PATH"
 
 # Install Python and create virtual environment
+ARG PYTHON_VERSION
 RUN uv python install ${PYTHON_VERSION} --default --preview && \
     uv venv --seed /venv
 # venv 는 /venv 에 영구히 둔다. 예전에는 pre_start.sh 가 매 기동마다 /workspace/venv 로 rsync 복사했고
@@ -96,16 +104,22 @@ RUN uv python install ${PYTHON_VERSION} --default --preview && \
 # PATH 에서도 빼야 한다 — 남겨두면 유저가 /workspace 에 venv 를 만드는 순간 /venv 를 가로챈다.
 ENV PATH="/venv/bin:$PATH"
 
-# Install essential Python packages and dependencies. triton is required by
-# many ComfyUI custom nodes (xformers, attention kernels) on CUDA wheels, so we
-# install it explicitly rather than relying on the PyTorch wheel's transitive
-# dependency.
+# Install essential Python packages and dependencies.
+#
+# ⚠️ triton 을 여기서 명시적으로 깔지 말 것. torch 의 **필수 의존성**이라 아래 torch
+# 설치가 정확한 핀 버전을 알아서 깔아준다 — torch-2.8.0+cu128 메타데이터:
+#   Requires-Dist: triton==3.4.0; platform_system == "Linux" and platform_machine == "x86_64"
+# 예전에는 "custom node 가 필요로 해서" 여기서 먼저 깔았는데, 그러면 PyPI 최신 triton 이
+# 깔린 뒤 torch 가 그걸 핀 버전으로 갈아엎고, 그 과정에서 하위 레이어 파일을 덮어쓰니
+# overlayfs 가 copy-up 을 강제해 **triton 이 이미지에 두 번** 들어갔다.
+# 2026-09-22 실측(base-torch2.8.0-cu128): 명시 설치 레이어 722.8MB + torch 레이어 566.2MB,
+# 앞의 722.8MB 는 전부 죽은 바이트였다 (압축 기준 약 215MB).
+# 부수 효과로 빌드 시점마다 중간 triton 버전이 달라져 재현성도 깨졌다.
 RUN pip install --no-cache-dir -U \
     pip setuptools wheel \
     jupyterlab jupyterlab_widgets ipykernel ipywidgets \
     huggingface_hub hf_transfer \
-    numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml \
-    triton
+    numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml
 
 # Install the PyTorch stack. TORCH_VERSION="nightly" triggers the nightly wheel
 # index; every other value installs pinned wheels from the stable index. All
@@ -115,6 +129,11 @@ RUN pip install --no-cache-dir -U \
 # Either way, the constraints file is generated from the *actually installed*
 # versions so the downstream custom-node installs don't accidentally pull a
 # different stack.
+ARG TORCH_VERSION
+# torchaudio must match torch exactly; torchvision uses its own
+# 0.{torch minor+15}.{patch} version line and is passed separately.
+ARG TORCHVISION_VERSION=0.23.0
+ARG CUDA_VERSION
 RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
         pip install --no-cache-dir --pre \
             torch torchvision torchaudio \
@@ -139,6 +158,12 @@ RUN python -c "import torch, torchvision, torchaudio; \
 # 매 기동마다 rsync 로 옮겼는데, /workspace 자체는 마운트가 아니라 그 1.38GiB 가 ephemeral 에 쌓였다.
 # models/ 하위 8개 role·output·user/default/workflows 는 런타임에 LV 로 덮이지만 그건 의도된 동작이고,
 # 나머지(comfy/, custom_nodes/, main.py 등)는 이미지 레이어에 남아 쓰기 레이어를 먹지 않는다.
+# ComfyUI release tag to check out. Pinning makes it obvious which version a
+# given image shipped, and bumping this value invalidates the clone layer's
+# build cache so a rebuild actually picks the new version up. Set to "master"
+# to track the tip instead.
+# 선언이 여기 있으므로 이 값을 올려도 위쪽(apt/uv/python/torch) 캐시는 살아있다.
+ARG COMFYUI_VERSION=v0.37.0
 RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI && \
     cd /workspace/ComfyUI && \
     git checkout "${COMFYUI_VERSION}" && \
@@ -150,13 +175,59 @@ RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI &
 
 COPY custom_nodes.txt /custom_nodes.txt
 
+# custom_nodes 설치를 3개 RUN 으로 나눴다. **실행 순서는 기존과 완전히 동일**하다
+# (clone 전체 → requirements 전체 → install.py 전체). 저장소를 그룹으로 쪼개면 pip
+# 해석 순서가 바뀌므로 그렇게 하지 않았다. 나누는 이유는 pull 병렬성이다:
+# containerd 는 max_concurrent_downloads=3 / max_concurrent_unpacks=1 인데
+# (2026-09-22 gpu-dev 실측) 6.0GB 짜리 단일 레이어는 다운로드 슬롯 하나만 쓰면서
+# 나머지 둘을 놀린다. 같은 노드에서 잰 CloudFront 처리량은 1스트림 14.7~19.5MiB/s,
+# 3스트림 46.4~49.8MiB/s, 6스트림 65.7MiB/s 로 **스트림당 대역이 상한**이었다.
+ARG SKIP_CUSTOM_NODES
+# custom_nodes.txt 는 "<url> <sha>" 형식이다 (핀 사유는 그 파일 헤더 참조).
+# `xargs -n 1 git clone` 을 못 쓰는 이유: SHA 를 두 번째 URL 로 넘겨버린다.
+#
+# 핀 적용은 `checkout --detach` 가 아니라 **`reset --hard`** 를 쓴다. detach 하면
+# ComfyUI-Manager 가 보는 상태가 바뀌어(브랜치 없음) 업데이트 경로가 달라지는데,
+# reset 은 기본 브랜치 ref 를 그 커밋으로 되돌리므로 "브랜치에 붙어 있고 upstream 보다
+# N 커밋 뒤" 라는 평범한 상태가 되고 Manager 의 `git pull` 이 그대로 fast-forward 된다.
+#
+# `set -e` + 파이프 아닌 리다이렉트(`< /custom_nodes.txt`)인 이유: while 루프를 현재 셸에서
+# 돌려야 clone/reset 실패가 RUN 을 실패시킨다. 기존 `xargs` 도 실패를 전파했으므로(exit 123)
+# 그 성질을 유지하는 것이다 — 파이프로 넘기면 서브셸이 되어 조용히 성공한다.
+# `|| [ -n "$url" ]` 는 마지막 줄에 개행이 없어도 처리하기 위한 것이다.
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
-        cd /workspace/ComfyUI/custom_nodes && \
-        xargs -n 1 git clone --recursive < /custom_nodes.txt && \
-        find /workspace/ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
-        find /workspace/ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
+        set -e; \
+        cd /workspace/ComfyUI/custom_nodes; \
+        while read -r url sha _rest || [ -n "$url" ]; do \
+            case "$url" in ''|'#'*) continue ;; esac; \
+            dir=$(basename "$url" .git); \
+            if [ -z "$sha" ]; then \
+                echo "[build] WARNING: $dir has no pinned SHA, using default branch HEAD" >&2; \
+                git clone --quiet "$url" "$dir"; \
+            else \
+                echo "[build] $dir @ $sha"; \
+                git clone --quiet "$url" "$dir"; \
+                git -C "$dir" reset --hard --quiet "$sha"; \
+            fi; \
+            git -C "$dir" submodule update --init --recursive --quiet; \
+        done < /custom_nodes.txt; \
     else \
         echo "Skipping custom nodes installation because SKIP_CUSTOM_NODES is set"; \
+    fi
+
+RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
+        find /workspace/ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
+        # TensorRT 의 Windows 크로스빌드용 builder resource 를 버린다 (2026-09-22 실측
+        # 1.947GB, 8개 파일: win_sm75/80/86/89/90/100/120/ptx). 리눅스 컨테이너에서
+        # Windows 엔진을 굽는 경로는 존재하지 않으므로 쓰이지 않는다. **이 파일들을 만든
+        # RUN 과 같은 RUN 에서** 지워야 레이어에 안 남는다 — 다음 RUN 에서 지우면 whiteout
+        # 만 생기고 바이트는 그대로 배포된다. glob 이 안 맞아도 `rm -f` 는 0 을 반환하므로
+        # tensorrt 가 안 깔린 경우에도 안전하다.
+        rm -f /venv/lib/python*/site-packages/tensorrt_libs/libnvinfer_builder_resource_win_*.so.*; \
+    fi
+
+RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
+        find /workspace/ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
     fi && \
     # 빌드 타임 pip 캐시 제거(2.82GB). 위 pip 은 전부 --no-cache-dir 이지만 custom node 의 install.py 가
     # 서브프로세스로 부르는 pip 은 그걸 상속하지 않아 여기서만 쌓인다 (예: ComfyUI-Frame-Interpolation
@@ -166,14 +237,37 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
     echo "[build] pruning pip cache: ${PIP_CACHE_DIR}" && \
     rm -rf "${PIP_CACHE_DIR:?}"
 
-# Custom node dependencies may pull a different PyTorch wheel from PyPI.
-# Re-assert the CUDA-specific stack after those installs. Uses the same
-# nightly / stable branching as the initial install.
-RUN if [ "${TORCH_VERSION}" = "nightly" ]; then \
+# Custom node dependencies may pull a different PyTorch wheel from PyPI, so the
+# CUDA-specific stack has to be re-asserted after those installs.
+#
+# ⚠️ 예전에는 여기서 조건 없이 `pip install --force-reinstall` 을 돌렸다. 그러면 드리프트가
+# 없어도 /venv 의 torch 파일을 전부 다시 쓰는데, 그 파일들은 하위 레이어에 있으므로
+# overlayfs 가 통째로 copy-up 한다 → **torch 사본이 이미지에 두 번 들어간다.**
+# 2026-09-22 실측: cu128 은 L20 3.984GB + L25 4.016GB 가 서로 다른 digest 로 둘 다
+# 배포됐고(실제로 쓰이는 건 L25 뿐), cu130 은 L23 2.773GB + L28 2.803GB 였다.
+#
+# 게다가 그 재설치는 할 일이 없었다 — custom_nodes 레이어(6.0GB, 26,072 파일)를 전수
+# 조사한 결과 torch/torchvision/torchaudio/nvidia-*/triton 파일이 **하나도 없다**
+# (유일한 매치는 무관한 nvidia_ml_py.dist-info 10KB). 위 `--constraint` 가 이미 제
+# 역할을 하고 있다는 뜻이다.
+#
+# 그래서 **무조건 재설치 대신 검증 후 필요할 때만 복구**한다. 사후 조건은 동일하고
+# (torch 가 고정된 CUDA 휠과 일치), 평시에는 이 레이어가 수 KB 로 줄어든다. 비교 대상은
+# 최초 설치 직후 기록해 둔 /pytorch-constraints.txt 라 버전 표기 방식과 무관하며
+# nightly 분기에서도 그대로 동작한다. import 자체가 깨져도, 파일이 없어도 복구 경로로 간다.
+# 이 레이어가 언젠가 다시 GB 급으로 커지면 그건 custom node 가 스택을 건드렸다는 신호다.
+RUN if python -c "import sys, torch, torchvision, torchaudio; \
+        want = dict(l.strip().split('==') for l in open('/pytorch-constraints.txt') if l.strip()); \
+        got = {'torch': torch.__version__, 'torchvision': torchvision.__version__, 'torchaudio': torchaudio.__version__}; \
+        sys.exit(0 if want == got else 1)"; then \
+        echo "[build] pytorch stack intact after custom-node installs; skipping re-install"; \
+    elif [ "${TORCH_VERSION}" = "nightly" ]; then \
+        echo "[build] pytorch stack drifted; re-asserting nightly wheels"; \
         pip install --no-cache-dir --pre --force-reinstall \
             torch torchvision torchaudio \
             --index-url "https://download.pytorch.org/whl/nightly/${CUDA_VERSION}"; \
     else \
+        echo "[build] pytorch stack drifted; re-asserting pinned wheels"; \
         pip install --no-cache-dir --force-reinstall \
             torch==${TORCH_VERSION} \
             torchvision==${TORCHVISION_VERSION} \
@@ -236,109 +330,21 @@ COPY --chmod=755 scripts/ensure_pytorch_stack.sh /
 #    사라진다). 깊이는 자유 — pre_start.sh 가 `find` 로 훑는다.
 COPY workflows/ /ComfyUI/user/default/workflows/
 
-# Stage frontend-only custom extensions (e.g. zit-autoload). Activated below
-# only for variants that opt in, so base/slim images don't auto-load a workflow
-# whose models they don't have.
+# Stage frontend-only custom extensions. Only meshive-autoload remains; the
+# per-preset *-autoload extensions were removed with the preset baking.
 COPY custom_extensions/ /custom_extensions/
 
-# Install the matching auto-load extension when a preset is requested.
-# 확장은 앱 트리(/workspace/ComfyUI/custom_nodes)로 들어간다 — custom_nodes 는 마운트가 아니다.
-# 반면 baked 모델은 아래에서 /ComfyUI/models/ 에 남긴다: /workspace/ComfyUI/models/* 의 8개 role 은
-# 런타임에 LV 로 덮이므로 거기 두면 shadow 되어 사라진다. start.sh 의 configure_model_paths() 가
-# /ComfyUI/models 를 찾아 extra_model_paths.yaml 로 노출시킨다.
-# meshive-autoload 는 **모든 변형에 설치한다.** 프리셋 전용 확장과 달리 열 대상을 빌드
-# 시점에 고정하지 않고 런타임 시드 마커(`.meshive/seeded/` 중 `bundled-` 접두사가 **아닌**
-# 것 = asset set 스타터)에서 찾으므로, base 에서는 붙인 asset set 의 workflow 를 열고
-# 프리셋에서는 그런 마커가 없어(config semantic path 미선언 → workflow-seed init 자체가
-# 안 붙는다) 조용히 no-op 이 된다 → 프리셋의 `{preset}-autoload` 와 경합하지 않는다.
-RUN cp -r /custom_extensions/meshive-autoload /workspace/ComfyUI/custom_nodes/meshive-autoload && \
-    if [ -n "$BAKE_PRESET" ]; then \
-        if [ ! -d "/custom_extensions/${BAKE_PRESET}-autoload" ]; then \
-            echo "Unknown BAKE_PRESET=${BAKE_PRESET} (no /custom_extensions/${BAKE_PRESET}-autoload)" >&2; \
-            exit 1; \
-        fi; \
-        cp -r "/custom_extensions/${BAKE_PRESET}-autoload" "/workspace/ComfyUI/custom_nodes/${BAKE_PRESET}-autoload"; \
-    fi && \
-    rm -rf /custom_extensions
+# meshive-autoload 를 앱 트리(/workspace/ComfyUI/custom_nodes)에 설치한다 — custom_nodes 는
+# 마운트가 아니다. 열 대상을 빌드 시점에 고정하지 않고 런타임 시드 마커
+# (`.meshive/seeded/` 중 `bundled-` 접두사가 **아닌** 것 = asset set 스타터)에서
+# 찾으므로, 붙인 asset set 의 workflow 를 열고 없으면 조용히 no-op 이 된다.
+#
+# 2026-09-22: BAKE_PRESET 기반 프리셋 굽기를 제거했다. 프리셋 5종은 2026-09-04 에
+# 퇴역됐고(WSB seed_k8s_templates.py RETIRED_OFFICIAL_IMAGES) Quick Deploy 는 base
+# 이미지 + input asset 으로 대체됐다. 퇴역 사유 자체가 크기였다 — 16~31GB 단일
+# 모델 레이어가 콜드 pull 15분을 넘겨 real 배포 사고(tx 73127)를 냈다.
+RUN cp -r /custom_extensions/meshive-autoload /workspace/ComfyUI/custom_nodes/meshive-autoload &&     rm -rf /custom_extensions
 
-# Bake the model set for the selected preset. Models are multi-GB so we retry
-# transient network failures to keep CI builds from flaking on connection drops.
-RUN set -e; \
-    dl() { wget -q --show-progress --retry-connrefused --tries=3 --waitretry=5 -O "$2" "$1"; }; \
-    case "$BAKE_PRESET" in \
-        "") echo "No preset baking";; \
-        zit) \
-            mkdir -p /ComfyUI/models/text_encoders \
-                     /ComfyUI/models/diffusion_models \
-                     /ComfyUI/models/vae \
-                     /ComfyUI/models/loras \
-                     /ComfyUI/models/model_patches; \
-            dl https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors \
-               /ComfyUI/models/text_encoders/qwen_3_4b.safetensors; \
-            dl https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors \
-               /ComfyUI/models/diffusion_models/z_image_turbo_bf16.safetensors; \
-            dl https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors \
-               /ComfyUI/models/vae/ae.safetensors; \
-            dl https://huggingface.co/tarn59/pixel_art_style_lora_z_image_turbo/resolve/main/pixel_art_style_z_image_turbo.safetensors \
-               /ComfyUI/models/loras/pixel_art_style_z_image_turbo.safetensors; \
-            dl https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors \
-               /ComfyUI/models/model_patches/Z-Image-Turbo-Fun-Controlnet-Union.safetensors; \
-            ;; \
-        flux) \
-            mkdir -p /ComfyUI/models/diffusion_models \
-                     /ComfyUI/models/text_encoders \
-                     /ComfyUI/models/vae; \
-            dl https://huggingface.co/Comfy-Org/flux1-schnell/resolve/main/flux1-schnell.safetensors \
-               /ComfyUI/models/diffusion_models/flux1-schnell.safetensors; \
-            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/clip_l.safetensors \
-               /ComfyUI/models/text_encoders/clip_l.safetensors; \
-            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors \
-               /ComfyUI/models/text_encoders/t5xxl_fp16.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors \
-               /ComfyUI/models/vae/ae.safetensors; \
-            ;; \
-        qwen) \
-            mkdir -p /ComfyUI/models/diffusion_models \
-                     /ComfyUI/models/text_encoders \
-                     /ComfyUI/models/vae \
-                     /ComfyUI/models/loras; \
-            dl https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/diffusion_models/qwen_image_fp8_e4m3fn.safetensors \
-               /ComfyUI/models/diffusion_models/qwen_image_fp8_e4m3fn.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors \
-               /ComfyUI/models/text_encoders/qwen_2.5_vl_7b_fp8_scaled.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Qwen-Image_ComfyUI/resolve/main/split_files/vae/qwen_image_vae.safetensors \
-               /ComfyUI/models/vae/qwen_image_vae.safetensors; \
-            dl https://huggingface.co/lightx2v/Qwen-Image-Lightning/resolve/main/Qwen-Image-Lightning-8steps-V1.0.safetensors \
-               /ComfyUI/models/loras/Qwen-Image-Lightning-8steps-V1.0.safetensors; \
-            ;; \
-        ltx) \
-            mkdir -p /ComfyUI/models/checkpoints \
-                     /ComfyUI/models/text_encoders; \
-            dl https://huggingface.co/Lightricks/LTX-Video/resolve/main/ltx-video-2b-v0.9.safetensors \
-               /ComfyUI/models/checkpoints/ltx-video-2b-v0.9.safetensors; \
-            dl https://huggingface.co/comfyanonymous/flux_text_encoders/resolve/main/t5xxl_fp16.safetensors \
-               /ComfyUI/models/text_encoders/t5xxl_fp16.safetensors; \
-            ;; \
-        wan) \
-            mkdir -p /ComfyUI/models/diffusion_models \
-                     /ComfyUI/models/text_encoders \
-                     /ComfyUI/models/vae \
-                     /ComfyUI/models/loras; \
-            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors \
-               /ComfyUI/models/diffusion_models/wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors \
-               /ComfyUI/models/diffusion_models/wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors \
-               /ComfyUI/models/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/vae/wan_2.1_vae.safetensors \
-               /ComfyUI/models/vae/wan_2.1_vae.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors \
-               /ComfyUI/models/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors; \
-            dl https://huggingface.co/Comfy-Org/Wan_2.2_ComfyUI_Repackaged/resolve/main/split_files/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors \
-               /ComfyUI/models/loras/wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors; \
-            ;; \
-        *) echo "Unknown BAKE_PRESET=${BAKE_PRESET}" >&2; exit 1;; \
-    esac
 
 # Welcome Message
 # The greeting text lives inside meshive.txt (blank separator line and
@@ -346,6 +352,18 @@ RUN set -e; \
 # escape handling, which is shell-dependent and was collapsing the newline.
 COPY logo/meshive.txt /etc/meshive.txt
 RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
+
+# 런타임 전용 ENV. 파일 맨 아래에 둔다 — ENV 도 그 아래 RUN 들의 캐시 키에
+# 들어가므로 위에 두면 ARG 를 내려 얻은 캐시 이득이 그대로 사라진다. 여기 아래로는 RUN 이 없다.
+# 소비자: ensure_pytorch_stack.sh (TORCH_VERSION/TORCHVISION_VERSION/CUDA_VERSION),
+# download_presets.sh (PRESET_DOWNLOAD). PYTORCH_STACK_ID 는 진단용 기록이다.
+# Comma-separated list of presets to download into the model mount at runtime.
+ARG DEFAULT_PRESET_DOWNLOAD=""
+ENV TORCH_VERSION=${TORCH_VERSION}
+ENV TORCHVISION_VERSION=${TORCHVISION_VERSION}
+ENV CUDA_VERSION=${CUDA_VERSION}
+ENV PYTORCH_STACK_ID="python-${PYTHON_VERSION}-torch-${TORCH_VERSION}-torchvision-${TORCHVISION_VERSION}-${CUDA_VERSION}"
+ENV PRESET_DOWNLOAD=${DEFAULT_PRESET_DOWNLOAD}
 
 # Set entrypoint to the start script
 CMD ["/start.sh"]

@@ -42,48 +42,6 @@ execute_script() {
     fi
 }
 
-# Setup ssh
-setup_ssh() {
-    if [[ $PUBLIC_KEY ]]; then
-        echo "Setting up SSH..."
-        mkdir -p ~/.ssh
-        echo "$PUBLIC_KEY" >> ~/.ssh/authorized_keys
-        chmod 700 -R ~/.ssh
-
-        if [ ! -f /etc/ssh/ssh_host_rsa_key ]; then
-            ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -q -N ''
-            echo "RSA key fingerprint:"
-            ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub
-        fi
-
-        if [ ! -f /etc/ssh/ssh_host_dsa_key ]; then
-            ssh-keygen -t dsa -f /etc/ssh/ssh_host_dsa_key -q -N ''
-            echo "DSA key fingerprint:"
-            ssh-keygen -lf /etc/ssh/ssh_host_dsa_key.pub
-        fi
-
-        if [ ! -f /etc/ssh/ssh_host_ecdsa_key ]; then
-            ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -q -N ''
-            echo "ECDSA key fingerprint:"
-            ssh-keygen -lf /etc/ssh/ssh_host_ecdsa_key.pub
-        fi
-
-        if [ ! -f /etc/ssh/ssh_host_ed25519_key ]; then
-            ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -q -N ''
-            echo "ED25519 key fingerprint:"
-            ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
-        fi
-
-        service ssh start
-
-        echo "SSH host keys:"
-        for key in /etc/ssh/*.pub; do
-            echo "Key: $key"
-            ssh-keygen -lf $key
-        done
-    fi
-}
-
 # Export env vars
 export_env_vars() {
     echo "Exporting environment variables..."
@@ -180,12 +138,6 @@ is_mounted_path() {
     awk -v target="$target_path" '$2 == target { found=1 } END { exit(found ? 0 : 1) }' /proc/mounts
 }
 
-has_model_files() {
-    local target_path="$1"
-
-    [ -d "$target_path" ] && [ -n "$(find "$target_path" -type f | head -n 1)" ]
-}
-
 configure_model_paths() {
     local target_models=""
     local config_path="/workspace/ComfyUI/extra_model_paths.yaml"
@@ -203,22 +155,23 @@ configure_model_paths() {
         return
     fi
 
-    if has_model_files /ComfyUI/models; then
-        target_models="/ComfyUI/models"
-        echo "[Auto-Mount] 이미지 내장 모델 경로 발견: $target_models"
-    elif [ -d /workspace/models ]; then
+    # /ComfyUI/models 분기는 2026-09-22 에 제거됐다. 그 경로는 BAKE_PRESET 프리셋이
+    # 굽던 가중치 전용이었고, 프리셋 빌드 자체가 Dockerfile 에서 사라졌다.
+    # MODEL_MOUNT_PATH / ensure_model_dirs 계약은 그대로다 — download_model_presets() 가
+    # 그걸 소비하므로 비워두면 수십 GB 가 시스템 스토리지로 떨어진다.
+    if [ -d /workspace/models ]; then
         target_models="/workspace/models"
-        echo "[Auto-Mount] 모델 마운트 발견: $target_models"
-    else
-        echo '[Auto-Mount] /mnt 경로 하위에서 storage 패턴을 찾는 중...'
-        if [ -d /mnt ]; then
-            target_models=$(find /mnt -maxdepth 1 -name 'storage*' -type d | head -n 1 || true)
-        fi
+        echo "[Auto-Mount] Found model mount: $target_models"
     fi
+    # 예전에는 여기 else 로 `find /mnt -maxdepth 1 -name 'storage*'` 프로브가 있었다.
+    # RunPod 시절 잔재라 현행 K8s 규약에서는 절대 매치될 수 없다 — 유저 볼륨은 /mnt/data 에
+    # 붙고 이 휴리스틱은 (alias 가 아니라) 마운트 경로를 본다. 매치되지 않으므로 늘 아래
+    # `-z "$target_models"` 분기로 떨어졌고, 즉 동작은 그대로다. (2026-09-22 제거)
 
     if [ -z "$target_models" ]; then
-        # 이미지 내장 모델이 없는 변형(base/slim). 앱 트리를 /workspace/ComfyUI 에 굽게 되면서
-        # /ComfyUI 자체가 생기지 않으므로 여기로 떨어진다. 이 경우 ComfyUI 네이티브 경로
+        # 현재 모든 변형이 여기로 떨어진다 (2026-09-22 프리셋 굽기 제거 이후).
+        # /ComfyUI 는 여전히 있지만(COPY workflows/ 가 거기 들어간다) /ComfyUI/models 는 없다.
+        # 이 경우 ComfyUI 네이티벌 경로
         # (/workspace/ComfyUI/models/*)가 곧 LV 마운트 지점이라 extra_model_paths.yaml 없이
         # 그대로 동작한다 — 마운트되지 않는 role(configs·clip·clip_vision·audio_encoders·
         # model_patches)도 folder_paths 가 네이티브로 등록하므로 잃는 기능이 없다.
@@ -228,7 +181,7 @@ configure_model_paths() {
         # 시스템 스토리지에 받는다. (다만 그 함수의 tmp_dir=$models_root/.tmp 는 8개 role 밖이라
         # 여전히 ephemeral 이다 — 프리셋 다운로드를 실제로 쓰게 되면 PRESET_TMP_DIR 을 마운트된
         # 경로로 지정할 것.)
-        echo '[Auto-Mount] 이미지 내장 모델 없음 — ComfyUI 네이티브 경로 사용'
+        echo '[Auto-Mount] No models baked into the image - using ComfyUI native model paths'
         MODEL_MOUNT_PATH="/workspace/ComfyUI/models"
         export MODEL_MOUNT_PATH
         ensure_model_dirs "$MODEL_MOUNT_PATH"
@@ -240,7 +193,7 @@ configure_model_paths() {
     ensure_model_dirs "$target_models"
 
     printf "comfyui:\n    base_path: %s\n    checkpoints: checkpoints/\n    loras: loras/\n    vae: vae/\n    configs: configs/\n    controlnet: controlnet/\n    upscale_models: upscale_models/\n    embeddings: embeddings/\n    clip: clip/\n    clip_vision: clip_vision/\n    diffusion_models: diffusion_models/\n    text_encoders: text_encoders/\n    audio_encoders: audio_encoders/\n    model_patches: model_patches/\n" "$target_models" > "$config_path"
-    echo '[Auto-Mount] extra_model_paths.yaml 설정 완료'
+    echo '[Auto-Mount] Wrote extra_model_paths.yaml'
 }
 
 download_model_presets() {
@@ -258,18 +211,18 @@ download_model_presets() {
     local models_root="${MODEL_MOUNT_PATH:-}"
     if [ -z "$models_root" ]; then
         if [ "${ALLOW_PRESET_DOWNLOAD_WITHOUT_MODEL_MOUNT,,}" != "true" ]; then
-            echo "[Preset] 경고: 모델 마운트 경로를 찾지 못해 PRESET_DOWNLOAD=$presets 를 건너뜁니다."
-            echo "[Preset] 시스템 스토리지 보호를 위해 모델 마운트 없이 자동 다운로드하지 않습니다."
+            echo "[Preset] Warning: no model mount found - skipping PRESET_DOWNLOAD=$presets"
+            echo "[Preset] Models are downloaded only to a mounted volume, to protect system storage."
             return
         fi
 
         models_root="/workspace/models"
-        echo "[Preset] 경고: 모델 마운트 없이 $models_root 로 다운로드합니다."
+        echo "[Preset] Warning: no model mount - downloading to $models_root instead."
     fi
 
     if [ "${ALLOW_PRESET_DOWNLOAD_WITHOUT_MODEL_MOUNT,,}" != "true" ] && ! is_mounted_path "$models_root"; then
-        echo "[Preset] 경고: $models_root 는 마운트 포인트가 아니라서 PRESET_DOWNLOAD=$presets 를 건너뜁니다."
-        echo "[Preset] 시스템 스토리지 보호를 위해 모델 마운트가 확인된 경우에만 자동 다운로드합니다."
+        echo "[Preset] Warning: $models_root is not a mount point - skipping PRESET_DOWNLOAD=$presets"
+        echo "[Preset] Models are downloaded only once a mounted volume is confirmed, to protect system storage."
         return
     fi
 
@@ -298,7 +251,11 @@ execute_script "/post_start.sh" "Running post-start script..."
 
 download_model_presets &
 
-setup_ssh
+# setup_ssh 는 제거됐다 (2026-09-22). $PUBLIC_KEY 가 설정되어야만 동작했는데
+# 플랫폼 어느 코드도 그 변수를 설정하지 않아 한 번도 타지 않는 경로였다
+# (WebServerBackend/K8sControlServer/WebFrontend 전수 확인). Pod 셔임 접속은
+# files/ssh/ 의 노드-로컬 exec 게이트웨이(execd -> CRI)를 쓰며 컨테이너 안의
+# sshd 와 무관하므로, 이 함수가 없어도 플랫폼 SSH 는 그대로 동작한다.
 start_jupyter
 start_code_server
 export_env_vars
