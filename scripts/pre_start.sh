@@ -9,24 +9,33 @@ echo "$TZ" | sudo tee /etc/timezone > /dev/null
 sudo ln -sf "/usr/share/zoneinfo/$TZ" /etc/localtime
 sudo dpkg-reconfigure -f noninteractive tzdata
 
-# venv 와 앱 트리는 이제 이미지가 최종 위치에 갖고 있다 — 런타임 복사가 없다.
+# venv(/venv)와 앱 코드(/opt/ComfyUI)는 이미지가 최종 위치에 갖고 있다 — 런타임 복사가 없다.
 #
 # 예전에는 여기서 /venv(12.18GiB) 를 /workspace/venv 로, /ComfyUI 를 /workspace/ComfyUI 로 rsync 했다.
 # RunPod 에서는 /workspace 가 영구 네트워크 볼륨이라 "이미지 → 볼륨" 이동으로 말이 됐지만, 우리 K8s pod
-# 에서는 /workspace 자체가 마운트가 아니고 그 하위 10개 경로(models 8종·output·user/default/workflows)만
-# LV 다. 그래서 복사본 13.56GiB 가 통째로 컨테이너 쓰기 레이어(= system storage)에 쌓였고, 매 기동마다
-# 30초를 썼다. 지금은 Dockerfile 이 venv 를 /venv 에, 앱 트리를 /workspace/ComfyUI 에 바로 만든다.
+# 에서는 볼륨이 없으면 /workspace 자체는 마운트가 아니고 그 하위 semantic path(models/*·input·output·
+# user/default/workflows)만 LV 다. 그래서 복사본 13.56GiB 가 통째로 컨테이너 쓰기 레이어(= system
+# storage)에 쌓였고, 매 기동마다 30초를 썼다.
 #
-# venv 를 /workspace 로 옮기지 않은 이유: /venv 는 어떤 볼륨 마운트에도 가려질 수 없다.
-# 앱 트리는 models/output/workflows 마운트의 부모여야 해서 /workspace/ComfyUI 에 있어야만 한다.
+# 두 경로는 **어떤 볼륨 마운트에도 가려지지 않는 곳**이어야 한다. 한동안 앱 트리를 /workspace/ComfyUI 에
+# 구웠는데, 유저가 볼륨을 /workspace 나 /workspace/ComfyUI 에 붙이자 main.py 가 가려져 ComfyUI 만 죽었다.
+# 데이터 폴더(/workspace/ComfyUI)는 post_start.sh 가 `--base-directory` 로 ComfyUI 에 넘긴다.
 #
 # 아래는 그 레이아웃이 깨졌을 때 원인을 남기는 진단 로그다. exit 하지 않는다 — start.sh 는 `set -e` 이고
 # Jupyter/code-server/SSH 기동이 이 스크립트 뒤에 있어서, 여기서 죽으면 유저가 pod 에 접근할 수단이
 # 전혀 없는 채로 CrashLoopBackOff 가 되고 GPU 과금만 계속된다. 열화된 채로 뜨는 편이 낫다.
 [ -x /venv/bin/python ] || \
     echo "**** WARN: /venv/bin/python missing — image layout broken ****" >&2
-[ -f /workspace/ComfyUI/main.py ] || \
-    echo "**** WARN: /workspace/ComfyUI shadowed by a volume mount — this image bakes the app tree there ****" >&2
+[ -f /opt/ComfyUI/main.py ] || \
+    echo "**** WARN: /opt/ComfyUI/main.py missing — image layout broken or a volume is mounted over /opt/ComfyUI ****" >&2
+
+# 유저 볼륨이 데이터 폴더를 덮는 건 정상 사용법이다 (models·input·output·user·custom_nodes 가 그 볼륨에
+# 남는다). 지원 문의 때 배치를 바로 알 수 있게 한 줄 남긴다.
+for mount_point in /workspace /workspace/ComfyUI; do
+    if awk -v target="$mount_point" '$2 == target { found=1 } END { exit(found ? 0 : 1) }' /proc/mounts; then
+        echo "**** $mount_point is a mounted volume — ComfyUI data under /workspace/ComfyUI is stored on it ****"
+    fi
+done
 
 echo "**** syncing ComfyUI to workspace, please wait ****"
 if [ -d /ComfyUI ]; then
@@ -36,7 +45,7 @@ if [ -d /ComfyUI ]; then
         echo "**** Excluding existing output folder ****"
     fi
 
-    # 앱 코드는 이제 이미지가 /workspace/ComfyUI 에 갖고 있으므로 여기 남는 건 사실상
+    # 앱 코드는 이제 이미지가 /opt/ComfyUI 에 갖고 있으므로 /ComfyUI 에 남는 건 사실상
     # user/default/workflows 의 번들 예제뿐인데, 그건 아래 전용 블록이 처리한다 (이유는 거기
     # 주석). 그래서 현재 변형들에서 이 rsync 는 사실상 no-op 이다 — 이미지 레이아웃이 다시
     # 바뀔 때를 위한 방어로 남겨 둔다.

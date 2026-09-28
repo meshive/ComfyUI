@@ -88,6 +88,24 @@ bash /download_presets.sh PRESET1,PRESET2,...
 
 ---
 
+## 📂 Folder Layout
+
+| Path                              | Contents                                                        |
+| --------------------------------- | --------------------------------------------------------------- |
+| `/opt/ComfyUI`                    | ComfyUI app code and pre-installed custom nodes (in the image)  |
+| `/workspace/ComfyUI/models`       | Models                                                          |
+| `/workspace/ComfyUI/input`        | Uploaded inputs                                                 |
+| `/workspace/ComfyUI/output`       | Generated outputs                                               |
+| `/workspace/ComfyUI/user`         | Settings and saved workflows                                    |
+| `/workspace/ComfyUI/custom_nodes` | Custom nodes — pre-installed ones are links into `/opt/ComfyUI` |
+
+> To keep your data across Pods, mount a volume at `/workspace` or `/workspace/ComfyUI`. The app code lives outside `/workspace`, so the volume never hides it.\
+> Custom nodes you install are kept on the volume, but their Python packages go into the image's environment, so reinstall them on a new Pod.\
+> ComfyUI starts as `python /opt/ComfyUI/main.py --base-directory /workspace/ComfyUI ...` (see `/post_start.sh`).\
+> Without a volume there, `/workspace/ComfyUI` also looks like the old app folder for scripts that expect it: its other entries link into `/opt/ComfyUI`, and `main.py` is a small shim that runs `/opt/ComfyUI/main.py` with the same data folders.
+
+---
+
 ## 🧩 Pre-installed Components
 
 ### System

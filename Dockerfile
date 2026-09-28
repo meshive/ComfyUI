@@ -154,20 +154,32 @@ RUN python -c "import torch, torchvision, torchaudio; \
         f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')"
 
 # Install ComfyUI and ComfyUI Manager.
-# 앱 트리를 최종 위치인 /workspace/ComfyUI 에 바로 만든다. 예전에는 /ComfyUI 에 만들고 pre_start.sh 가
-# 매 기동마다 rsync 로 옮겼는데, /workspace 자체는 마운트가 아니라 그 1.38GiB 가 ephemeral 에 쌓였다.
-# models/ 하위 8개 role·output·user/default/workflows 는 런타임에 LV 로 덮이지만 그건 의도된 동작이고,
-# 나머지(comfy/, custom_nodes/, main.py 등)는 이미지 레이어에 남아 쓰기 레이어를 먹지 않는다.
+# 앱 코드는 /opt/ComfyUI — **볼륨이 붙는 자리(/workspace) 밖**에 둔다. 데이터 폴더(models·input·output·
+# user·custom_nodes)는 여전히 /workspace/ComfyUI 이고, post_start.sh 가 `--base-directory` 로 ComfyUI 에
+# 알려 준다. 템플릿 semantic path 선언(WSB seed_k8s_templates.py)이 전부 그 데이터 폴더 아래라 플랫폼 쪽은
+# 그대로다.
+#
+# 앱 위치의 이력: 처음엔 /ComfyUI 에 만들고 pre_start.sh 가 매 기동마다 /workspace/ComfyUI 로 rsync 했다
+# (1.38GiB 가 쓰기 레이어에 쌓임). 그다음엔 /workspace/ComfyUI 에 바로 구웠는데, 유저가 볼륨을 /workspace
+# (RunPod 관례이자 콘솔의 마운트 경로 안내 예시)나 /workspace/ComfyUI 에 붙이면 앱 트리가 통째로 가려져
+# `main.py` 를 못 찾고 ComfyUI 만 죽었다 — Jupyter·code-server 는 살아 있어 Pod 는 정상처럼 보였다
+# (2026-09-27). 플랫폼은 그 배치를 정상으로 본다: 조상 경로 볼륨이 하위 semantic path 전부의 저장소가 된다.
+#
+# user/ 는 ComfyUI sqlite DB 자리다. post_start.sh 와 호환 shim 이 `--database-url` 로 여기
+# (/opt/ComfyUI/user/comfyui.db)를 준다 — v0.37.0 기본값인 유저 폴더(= 데이터 폴더)는 NFS 일 수 있어서다
+# (같은 볼륨을 쓰는 Pod 끼리 DB 잠금이 부딪친다). 이 폴더는 ComfyUI 도 만들지만 자리를 분명히 해 둔다.
+#
 # ComfyUI release tag to check out. Pinning makes it obvious which version a
 # given image shipped, and bumping this value invalidates the clone layer's
 # build cache so a rebuild actually picks the new version up. Set to "master"
 # to track the tip instead.
 # 선언이 여기 있으므로 이 값을 올려도 위쪽(apt/uv/python/torch) 캐시는 살아있다.
-ARG COMFYUI_VERSION=v0.37.0
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /workspace/ComfyUI && \
-    cd /workspace/ComfyUI && \
+ARG COMFYUI_VERSION=v0.37.4
+RUN git clone https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI && \
+    cd /opt/ComfyUI && \
     git checkout "${COMFYUI_VERSION}" && \
     echo "ComfyUI pinned to ${COMFYUI_VERSION} ($(git rev-parse --short HEAD))" && \
+    mkdir -p user && \
     pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt && \
     git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/ComfyUI-Manager && \
     cd custom_nodes/ComfyUI-Manager && \
@@ -197,7 +209,7 @@ ARG SKIP_CUSTOM_NODES
 # `|| [ -n "$url" ]` 는 마지막 줄에 개행이 없어도 처리하기 위한 것이다.
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
         set -e; \
-        cd /workspace/ComfyUI/custom_nodes; \
+        cd /opt/ComfyUI/custom_nodes; \
         while read -r url sha _rest || [ -n "$url" ]; do \
             case "$url" in ''|'#'*) continue ;; esac; \
             dir=$(basename "$url" .git); \
@@ -216,7 +228,7 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
     fi
 
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
-        find /workspace/ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
+        find /opt/ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
         # TensorRT 의 Windows 크로스빌드용 builder resource 를 버린다 (2026-09-22 실측
         # 1.947GB, 8개 파일: win_sm75/80/86/89/90/100/120/ptx). 리눅스 컨테이너에서
         # Windows 엔진을 굽는 경로는 존재하지 않으므로 쓰이지 않는다. **이 파일들을 만든
@@ -227,7 +239,7 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
     fi
 
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
-        find /workspace/ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
+        find /opt/ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
     fi && \
     # 빌드 타임 pip 캐시 제거(2.82GB). 위 pip 은 전부 --no-cache-dir 이지만 custom node 의 install.py 가
     # 서브프로세스로 부르는 pip 은 그걸 상속하지 않아 여기서만 쌓인다 (예: ComfyUI-Frame-Interpolation
@@ -334,8 +346,14 @@ COPY workflows/ /ComfyUI/user/default/workflows/
 # per-preset *-autoload extensions were removed with the preset baking.
 COPY custom_extensions/ /custom_extensions/
 
-# meshive-autoload 를 앱 트리(/workspace/ComfyUI/custom_nodes)에 설치한다 — custom_nodes 는
-# 마운트가 아니다. 열 대상을 빌드 시점에 고정하지 않고 런타임 시드 마커
+# 이미지 안 경로를 ComfyUI 에 알려 주는 설정. ComfyUI 는 `--base-directory /workspace/ComfyUI` 로 뜨므로
+# 기본 경로가 전부 데이터 폴더를 가리킨다 — 동봉 config yaml(models/configs)은 이 파일이 두 번째 경로로
+# 덧붙인다. main.py 가 **앱 폴더의** extra_model_paths.yaml 을 자동으로 읽는다 (내용·사유는 파일 주석).
+# 이미지 내장 custom node 는 여기 넣지 않는다 — 데이터 쪽 custom_nodes 의 링크로 읽힌다(아래 호환 폴더).
+COPY config/extra_model_paths.yaml /opt/ComfyUI/extra_model_paths.yaml
+
+# meshive-autoload 를 이미지 내장 custom node 폴더(/opt/ComfyUI/custom_nodes)에 설치한다 — ComfyUI 는
+# 데이터 쪽 custom_nodes 에 걸린 링크로 이 폴더를 읽는다. 열 대상을 빌드 시점에 고정하지 않고 런타임 시드 마커
 # (`.meshive/seeded/` 중 `bundled-` 접두사가 **아닌** 것 = asset set 스타터)에서
 # 찾으므로, 붙인 asset set 의 workflow 를 열고 없으면 조용히 no-op 이 된다.
 #
@@ -343,8 +361,33 @@ COPY custom_extensions/ /custom_extensions/
 # 퇴역됐고(WSB seed_k8s_templates.py RETIRED_OFFICIAL_IMAGES) Quick Deploy 는 base
 # 이미지 + input asset 으로 대체됐다. 퇴역 사유 자체가 크기였다 — 16~31GB 단일
 # 모델 레이어가 콜드 pull 15분을 넘겨 real 배포 사고(tx 73127)를 냈다.
-RUN cp -r /custom_extensions/meshive-autoload /workspace/ComfyUI/custom_nodes/meshive-autoload &&     rm -rf /custom_extensions
+RUN cp -r /custom_extensions/meshive-autoload /opt/ComfyUI/custom_nodes/meshive-autoload &&     rm -rf /custom_extensions
 
+# 옛 경로 호환 — /workspace/ComfyUI 를 옛 앱 폴더처럼 보이게 굽는다. 볼륨이 /workspace 나 /workspace/ComfyUI
+# 를 덮지 않을 때만 보인다(덮으면 그 볼륨이 데이터 폴더가 되고, 기본 기동은 이 모양에 기대지 않는다).
+# real 에 이 경로를 앱 폴더로 전제하는 유저 부트스트랩이 있다 — main.py 실행, comfy/cli_args.py 검사,
+# custom_nodes 에 자기 노드를 심링크로 걸고 같은 이름의 내장 노드를 치우는 것까지 한다. 그래서:
+#   - main.py            : --base-directory /workspace/ComfyUI 로 /opt/ComfyUI/main.py 를 실행하는 shim
+#   - custom_nodes/      : 실제 폴더. 내장 노드마다 /opt/ComfyUI/custom_nodes/<이름> 심링크 (쓰기·교체 가능).
+#                          ComfyUI 는 이 폴더 하나에서만 노드를 읽는다 — 볼륨이 이 폴더를 덮으면 post_start.sh
+#                          가 같은 링크를 볼륨 쪽에 건다.
+#   - 그 밖의 앱 파일·폴더: /opt/ComfyUI/<이름> 심링크 (comfy/, server.py, requirements.txt ...)
+# 데이터 폴더(models·input·output·user)와 앱 쪽 설정 파일(extra_model_paths.yaml)은 만들지 않는다 — models/*
+# 등은 LV 마운트 지점이라 실제 폴더여야 하고, 설정 파일을 노출하면 start.sh 가 그걸 데이터 쪽 설정으로
+# 읽는다. 점 파일(.git 등)은 glob 에 안 걸려 빠진다.
+COPY config/compat_main.py /workspace/ComfyUI/main.py
+RUN set -e; \
+    mkdir -p /workspace/ComfyUI/custom_nodes; \
+    for entry in /opt/ComfyUI/*; do \
+        name=$(basename "$entry"); \
+        case "$name" in \
+            main.py|custom_nodes|models|input|output|user|temp|extra_model_paths.yaml) continue ;; \
+        esac; \
+        ln -s "$entry" "/workspace/ComfyUI/$name"; \
+    done; \
+    for node in /opt/ComfyUI/custom_nodes/*; do \
+        ln -s "$node" "/workspace/ComfyUI/custom_nodes/$(basename "$node")"; \
+    done
 
 # Welcome Message
 # The greeting text lives inside meshive.txt (blank separator line and

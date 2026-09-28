@@ -49,8 +49,11 @@ variable "TORCHVISION_VERSION_CU130" {
 #    — 위 TORCH_VERSION_CU130 의 2.11.0 상한은 이번 bump 로 풀리지 않는다.
 # COMFYUI_VERSION 은 태그 문자열에 안 들어가므로 이 bump 는 기존 태그를 덮어쓴다 —
 # 즉 seed 템플릿 행 교체가 없고, 위 TORCH_VERSION bump 런북은 해당되지 않는다.
+#
+# v0.37.0 → v0.37.4 (2026-09-28): 패치 태그 4개(GitHub Release 는 v0.37.0 까지만 있다).
+# requirements 차이는 comfyui-workflow-templates 0.11.66→0.11.69 뿐, manager_requirements 동일.
 variable "COMFYUI_VERSION" {
-    default = "v0.37.0"
+    default = "v0.37.4"
 }
 
 # ⚠️ **로컬 검증 전용이다. 이걸 붙인 태그를 릴리즈로 push 하지 말 것.**

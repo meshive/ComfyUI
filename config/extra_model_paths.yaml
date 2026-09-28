@@ -1,0 +1,16 @@
+# 이미지 안 경로를 ComfyUI 에 덧붙이는 설정.
+# Dockerfile 이 /opt/ComfyUI/extra_model_paths.yaml 로 복사하고, ComfyUI main.py 가 앱 폴더의 이 파일을
+# 자동으로 읽는다.
+#
+# ComfyUI 는 `--base-directory /workspace/ComfyUI` 로 데이터 폴더를 찾는다 (post_start.sh, 호환 shim). 그래서
+# 기본 경로(models/*, custom_nodes, input, output, user)는 전부 /workspace/ComfyUI 아래이고, 이미지 안
+# /opt/ComfyUI 에만 있는 것은 여기서 **두 번째 경로로** 덧붙여야 보인다 (is_default 가 없으면 뒤에 붙는다).
+#
+#   configs — ComfyUI 에 동봉된 SD1/SD2 설정 yaml 11개 (Load Checkpoint With Config 노드용). 데이터 쪽
+#             models/configs 는 start.sh 가 빈 폴더로 만든다.
+#
+# custom_nodes 는 여기 넣지 않는다. 내장 노드는 데이터 쪽 custom_nodes 에 심링크로 걸려 있어서(Dockerfile 의
+# 호환 폴더, 볼륨이면 post_start.sh) /opt/ComfyUI/custom_nodes 를 더하면 같은 노드가 두 번 로드된다.
+meshive_image:
+    base_path: /opt/ComfyUI
+    configs: models/configs

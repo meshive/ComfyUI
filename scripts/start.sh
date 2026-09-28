@@ -140,6 +140,8 @@ is_mounted_path() {
 
 configure_model_paths() {
     local target_models=""
+    # 데이터 폴더 쪽 설정 파일 — 앱 폴더(/opt/ComfyUI)가 아니므로 ComfyUI 가 알아서 읽지 않는다.
+    # post_start.sh 가 있으면 --extra-model-paths-config 로 넘긴다.
     local config_path="/workspace/ComfyUI/extra_model_paths.yaml"
 
     if [ -f "$config_path" ]; then
@@ -171,10 +173,11 @@ configure_model_paths() {
     if [ -z "$target_models" ]; then
         # 현재 모든 변형이 여기로 떨어진다 (2026-09-22 프리셋 굽기 제거 이후).
         # /ComfyUI 는 여전히 있지만(COPY workflows/ 가 거기 들어간다) /ComfyUI/models 는 없다.
-        # 이 경우 ComfyUI 네이티브 경로
-        # (/workspace/ComfyUI/models/*)가 곧 LV 마운트 지점이라 extra_model_paths.yaml 없이
-        # 그대로 동작한다 — 마운트되지 않는 role(configs·clip·clip_vision·audio_encoders·
-        # model_patches)도 folder_paths 가 네이티브로 등록하므로 잃는 기능이 없다.
+        # ComfyUI 는 `--base-directory /workspace/ComfyUI`(post_start.sh)로 뜨므로 기본 모델 경로
+        # (/workspace/ComfyUI/models/*)가 곧 LV(또는 유저 볼륨) 마운트 지점이라 이 파일 없이
+        # 그대로 동작한다 — semantic path 로 선언되지 않은 폴더(clip 등)도 folder_paths 가
+        # 기본 경로로 등록하므로 잃는 기능이 없다. 동봉 configs yaml 은 이미지 쪽 설정
+        # (/opt/ComfyUI/extra_model_paths.yaml)이 두 번째 경로로 붙인다.
         #
         # MODEL_MOUNT_PATH 를 비워두면 안 된다: ALLOW_PRESET_DOWNLOAD_WITHOUT_MODEL_MOUNT=true 로
         # 켰을 때 download_model_presets() 가 마운트가 아닌 /workspace/models 로 떨어져 수십 GB 를
