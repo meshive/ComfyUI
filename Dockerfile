@@ -1,6 +1,7 @@
 # Set the base image
 ARG BASE_IMAGE
-FROM ${BASE_IMAGE}
+# 단계 이름 `image` 는 파일 맨 아래 빌드 검사 단계와 최종 단계가 이 단계를 가리키려고 붙인다.
+FROM ${BASE_IMAGE} AS image
 
 # Set the shell and enable pipefail for better error handling
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -104,6 +105,26 @@ RUN uv python install ${PYTHON_VERSION} --default --preview && \
 # PATH 에서도 빼야 한다 — 남겨두면 유저가 /workspace 에 venv 를 만드는 순간 /venv 를 가로챈다.
 ENV PATH="/venv/bin:$PATH"
 
+# pip 잠금은 파일 두 개로 나눈다. 잠그는 이유와 다시 만드는 법은 constraints/cu130.txt 헤더에 있다.
+# 타깃별 파일은 bake 가 넘긴다 — cu130 만 잠그고, 레거시 타깃은 constraints/none.txt (잠금 없음).
+#   - 기반 잠금(PIP_BASE_LOCK_FILE, 여기): 바로 아래 기반 패키지 RUN 이 까는 것만 담는다. torch 레이어
+#     **위**에 있으므로 작게 두고, 기반 패키지를 일부러 올릴 때만 바꾼다.
+#   - 전체 잠금(PIP_LOCK_FILE): torch 아래, ComfyUI RUN 바로 위에서 들어온다. ComfyUI·custom node 를
+#     올리면 이 파일도 다시 만들어야 하는데(ComfyUI requirements 가 frontend 등을 == 로 고정한다), 그
+#     위치여야 그때도 torch 레이어(압축 ~2.8GB) 캐시가 살고 노드가 그 레이어를 다시 받지 않는다. 한 파일을
+#     여기 두면 ComfyUI 를 올릴 때마다 torch 까지 새 레이어가 된다 (2026-09-29 리뷰).
+# 공통 규칙:
+#   - `@` 가 있는 줄(직접 URL)은 constraint 로 줄 수 없어 빼고 넘긴다. 그 줄은 빌드 마지막 검사 단계가
+#     설치 목록 전체를 전체 잠금과 정확히 대조할 때 잡는다.
+#   - PIP_CONSTRAINT 는 RUN 안에서만 준다. ENV 로 두면 pod 안에서 유저가 하는 pip 설치까지 묶인다.
+#   - torch 설치 RUN 에는 주지 않는다. 그 RUN 은 download.pytorch.org 인덱스만 보는데, 잠긴 버전 중 그
+#     인덱스에 없는 것이 있으면 해석이 실패한다. torch 셋은 /pytorch-constraints.txt 가 맡고, torch 가
+#     버전을 정확히 고정하지 않는 의존성은 기반 RUN 이 먼저 깐다 (아래 sympy·networkx).
+ARG PIP_BASE_LOCK_FILE=constraints/none.txt
+COPY ${PIP_BASE_LOCK_FILE} /pip-base-lock.txt
+RUN sed -E '/^[[:space:]]*(#|$)/d; / @ /d' /pip-base-lock.txt > /pip-base-constraints.txt && \
+    echo "[build] pip base lock ${PIP_BASE_LOCK_FILE}: $(wc -l < /pip-base-constraints.txt) constraints"
+
 # Install essential Python packages and dependencies.
 #
 # ⚠️ triton 을 여기서 명시적으로 깔지 말 것. torch 의 **필수 의존성**이라 아래 torch
@@ -115,11 +136,18 @@ ENV PATH="/venv/bin:$PATH"
 # 2026-09-22 실측(base-torch2.8.0-cu128): 명시 설치 레이어 722.8MB + torch 레이어 566.2MB,
 # 앞의 722.8MB 는 전부 죽은 바이트였다 (압축 기준 약 215MB).
 # 부수 효과로 빌드 시점마다 중간 triton 버전이 달라져 재현성도 깨졌다.
-RUN pip install --no-cache-dir -U \
+#
+# sympy·networkx 는 torch 의존성인데 torch 가 버전을 `>=` 로만 요구한다. 여기서 잠근 버전으로 먼저 깔아
+# 두면 아래 torch RUN(잠금 없음, `-U` 없음)이 충족된 것으로 보고 그대로 둔다 — 안 그러면 torch 레이어를
+# 다시 빌드할 때 그날 인덱스의 새 버전이 들어온다. 위 triton 과 달리 torch 가 갈아엎지 않으므로 이미지에
+# 두 번 들어가지 않는다 (나머지 자유 의존성 filelock·typing-extensions·setuptools·jinja2·fsspec 은 이미
+# 이 목록의 의존성으로 들어온다, 2026-09-29 실측).
+RUN PIP_CONSTRAINT=/pip-base-constraints.txt pip install --no-cache-dir -U \
     pip setuptools wheel \
     jupyterlab jupyterlab_widgets ipykernel ipywidgets \
     huggingface_hub hf_transfer \
-    numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml
+    numpy scipy matplotlib pandas scikit-learn seaborn requests tqdm pillow pyyaml \
+    sympy networkx
 
 # Install the PyTorch stack. TORCH_VERSION="nightly" triggers the nightly wheel
 # index; every other value installs pinned wheels from the stable index. All
@@ -153,6 +181,13 @@ RUN python -c "import torch, torchvision, torchaudio; \
     open('/pytorch-constraints.txt', 'w').write( \
         f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')"
 
+# 전체 pip 잠금 — ComfyUI·Manager requirements, custom node requirements, install.py 안의 pip 에 적용되고,
+# 빌드 마지막 검사 단계가 설치 목록 전체를 이 파일과 대조한다. torch 아래에 두는 이유는 위 기반 잠금 주석.
+ARG PIP_LOCK_FILE=constraints/none.txt
+COPY ${PIP_LOCK_FILE} /pip-lock.txt
+RUN sed -E '/^[[:space:]]*(#|$)/d; / @ /d' /pip-lock.txt > /pip-constraints.txt && \
+    echo "[build] pip lock ${PIP_LOCK_FILE}: $(wc -l < /pip-constraints.txt) constraints"
+
 # Install ComfyUI and ComfyUI Manager.
 # 앱 코드는 /opt/ComfyUI — **볼륨이 붙는 자리(/workspace) 밖**에 둔다. 데이터 폴더(models·input·output·
 # user·custom_nodes)는 여전히 /workspace/ComfyUI 이고, post_start.sh 가 `--base-directory` 로 ComfyUI 에
@@ -175,13 +210,29 @@ RUN python -c "import torch, torchvision, torchaudio; \
 # to track the tip instead.
 # 선언이 여기 있으므로 이 값을 올려도 위쪽(apt/uv/python/torch) 캐시는 살아있다.
 ARG COMFYUI_VERSION=v0.37.4
-RUN git clone https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI && \
+# ComfyUI-Manager 도 커밋을 고정한다. 예전에는 기본 브랜치 HEAD 를 받았다.
+#   - 왜: 2026-09-23 하루에 빌드 4번이 서로 다른 커밋을 받았고(16989582 → 30fc9660 → db76cf00 → 73bbe810),
+#     같이 낼 cu128/cu130 후보끼리도 달랐다. 그날 차이는 노드 DB 뿐이었지만, 9/18 에는 보안 관련 동작 변경
+#     (#3298 비-loopback 리스너의 flagged 노드 설치 제한, #3296 UI 인젝션 수정)이 검토 없이 따라 들어왔다.
+#   - 값: 검증된 rc0928a 이미지에 실제로 들어간 커밋이다 (그 이미지 안에서 `git rev-parse HEAD`).
+#   - `reset --hard` 인 이유는 custom_nodes.txt 와 같다. 브랜치(main)에 붙은 채 upstream 보다 뒤인 평범한
+#     상태라 pod 안에서 Manager 의 자기 업데이트(`git pull`)가 그대로 된다. detach 하면 Manager 는 "항상
+#     업데이트 있음"으로 보고, 업데이트할 때 기본 브랜치로 강제 전환한다 (manager_core.py).
+#   - URL 은 ltdrdata 그대로 둔다. repo 는 Comfy-Org 로 옮겨져 GitHub 리다이렉트로 받는다. 그래도 Manager
+#     노드 DB 의 자기 항목이 ltdrdata URL 이고, 이미지 안 .git/config 도 검증본과 같게 유지된다. 리다이렉트가
+#     끊겨 다른 repo 를 받게 되면 그 repo 에 이 SHA 가 없어 빌드가 멈춘다.
+#   - 올릴 때: docker-bake.hcl 의 COMFYUI_MANAGER_SHA 를 바꾸고 이미지를 다시 검증한다.
+ARG COMFYUI_MANAGER_SHA=9c29dc68a488fd56e15f152807579009d627bfef
+RUN export PIP_CONSTRAINT=/pip-constraints.txt && \
+    git clone https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI && \
     cd /opt/ComfyUI && \
     git checkout "${COMFYUI_VERSION}" && \
     echo "ComfyUI pinned to ${COMFYUI_VERSION} ($(git rev-parse --short HEAD))" && \
     mkdir -p user && \
     pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt && \
     git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/ComfyUI-Manager && \
+    git -C custom_nodes/ComfyUI-Manager reset --hard --quiet "${COMFYUI_MANAGER_SHA}" && \
+    echo "ComfyUI-Manager pinned to $(git -C custom_nodes/ComfyUI-Manager rev-parse --short HEAD)" && \
     cd custom_nodes/ComfyUI-Manager && \
     pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt
 
@@ -227,8 +278,27 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
         echo "Skipping custom nodes installation because SKIP_CUSTOM_NODES is set"; \
     fi
 
+# requirements 설치 실패를 삼키지 않는다. 예전의 `find ... -exec pip install ... \;` 는 pip 가 실패해도
+# find 가 0 으로 끝나 빌드가 조용히 성공했다 (`-exec ... \;` 의 종료코드는 명령 결과와 무관하고 `+` 형태만
+# 전파한다 — 2026-09-23 실측). 그래서 파일마다 설치하고 실패를 모아 끝에 RUN 을 실패시킨다.
+#   - 순서는 예전과 같은 `find` 순회 순서다. 정렬하지 않는다 — 같은 모듈 폴더를 공유하는 배포판
+#     (onnxruntime ↔ onnxruntime-gpu, opencv 3종)은 나중에 깔린 쪽 파일이 남으므로 순서가 결과를 바꾼다.
+#   - comfyui-prompt-reader-node 의 git 서브모듈 stable_diffusion_prompt_reader/requirements.txt 는
+#     건너뛴다. 독립 GUI 앱용 목록이고 `Pillow~=10.3.0` 이 cp313 휠이 없어 소스 빌드가 실패한다 — 예전
+#     빌드도 매번 여기서 조용히 실패했고 그 파일에서는 아무것도 깔리지 않았다. 노드 자체는 이미지의 Pillow
+#     로 로드된다 (2026-09-23 노드 로드 검사).
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
-        find /opt/ComfyUI/custom_nodes -name "requirements.txt" -exec pip install --no-cache-dir --constraint /pytorch-constraints.txt -r {} \; && \
+        export PIP_CONSTRAINT=/pip-constraints.txt; \
+        failed=""; \
+        while IFS= read -r -d '' req; do \
+            case "$req" in \
+                */comfyui-prompt-reader-node/stable_diffusion_prompt_reader/requirements.txt) \
+                    echo "[build] skip $req (standalone app requirements)"; continue ;; \
+            esac; \
+            echo "[build] pip install -r $req"; \
+            pip install --no-cache-dir --constraint /pytorch-constraints.txt -r "$req" || failed="$failed $req"; \
+        done < <(find /opt/ComfyUI/custom_nodes -name requirements.txt -print0); \
+        if [ -n "$failed" ]; then echo "[build] requirements install failed:$failed" >&2; exit 1; fi; \
         # TensorRT 의 Windows 크로스빌드용 builder resource 를 버린다 (2026-09-22 실측
         # 1.947GB, 8개 파일: win_sm75/80/86/89/90/100/120/ptx). 리눅스 컨테이너에서
         # Windows 엔진을 굽는 경로는 존재하지 않으므로 쓰이지 않는다. **이 파일들을 만든
@@ -238,8 +308,21 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
         rm -f /venv/lib/python*/site-packages/tensorrt_libs/libnvinfer_builder_resource_win_*.so.*; \
     fi
 
+# install.py 도 같은 방식으로 실패를 모은다 (실행 방식·순서는 예전 `-exec python {} \;` 와 같다).
+# PIP_CONSTRAINT 를 export 하는 이유: install.py 가 서브프로세스로 부르는 pip(os.system)은 명령줄
+# --constraint 를 못 받지만 환경변수는 물려받는다.
+# ⚠️ 종료코드로 못 잡는 실패가 남는다. ComfyUI-Frame-Interpolation 의 install.py 는 cupy 설치(cupy-wheel
+#    소스 빌드)가 실패해도 os.system 결과를 버리고 0 으로 끝난다. 그래서 cupy 를 쓰는 VFI 노드 4개(GMFSS
+#    Fortuna·M2M·Sepconv·STMFNet)는 실행할 때 실패한다 — 라이브 이미지도 같은 알려진 상태다. 이 실패는
+#    빌드가 잡지 못한다. 대신 설치 목록이 잠금과 달라지는 실패는 빌드 마지막 잠금 대조가 잡는다.
 RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
-        find /opt/ComfyUI/custom_nodes -name "install.py" -exec python {} \; ; \
+        export PIP_CONSTRAINT=/pip-constraints.txt; \
+        failed=""; \
+        while IFS= read -r -d '' inst; do \
+            echo "[build] python $inst"; \
+            python "$inst" || failed="$failed $inst"; \
+        done < <(find /opt/ComfyUI/custom_nodes -name install.py -print0); \
+        if [ -n "$failed" ]; then echo "[build] install.py failed:$failed" >&2; exit 1; fi; \
     fi && \
     # 빌드 타임 pip 캐시 제거(2.82GB). 위 pip 은 전부 --no-cache-dir 이지만 custom node 의 install.py 가
     # 서브프로세스로 부르는 pip 은 그걸 상속하지 않아 여기서만 쌓인다 (예: ComfyUI-Frame-Interpolation
@@ -410,3 +493,53 @@ ENV PRESET_DOWNLOAD=${DEFAULT_PRESET_DOWNLOAD}
 
 # Set entrypoint to the start script
 CMD ["/start.sh"]
+
+# ── 빌드 마지막 검사 (별도 단계) ─────────────────────────────────────────────────────────────
+# 위 이미지를 그대로 받아 세 가지를 확인하고, 하나라도 실패하면 빌드 전체를 실패시킨다. 별도 단계에서 하는
+# 이유: ComfyUI 를 한 번 띄우면 로그·DB·캐시 같은 부산물이 생기는데, 그걸 이미지 레이어에 남기지 않으려는
+# 것이다. 최종 이미지는 이 단계가 만든 표지 파일 하나만 받는다 (아래 마지막 `FROM image`).
+#   1) 노드 로드: `main.py --quick-test-for-ci` 로 이미지 안 custom node 를 전부 불러 IMPORT FAILED 가
+#      없는지 본다 (2026-09-29 rc0928a 에서 26개 로드, 25초). 로드가 /venv 를 바꾸면(런타임 자동 설치)
+#      그것도 실패로 본다 — 그러면 모든 pod 가 기동마다 설치를 하게 된다.
+#   2) 잠금 대조: 설치 목록(`pip freeze --all`, torch 셋 제외)이 PIP_LOCK_FILE 과 정확히 같은지 본다.
+#      잠금이 비었거나(none.txt) custom node 를 안 까는 slim 타깃이면 건너뛴다.
+#   3) 모듈 폴더를 공유하는 배포판의 승자: onnxruntime ↔ onnxruntime-gpu, opencv 3종은 같은 폴더를 쓰고
+#      나중에 깔린 쪽 파일이 남는다. 버전이 같으면 2) 는 통과하므로, 실제로 남은 쪽을 따로 본다 — GPU 빌드의
+#      CUDAExecutionProvider 와 opencv-contrib 모듈(rc0928a 실측 상태). 설치 순서는 find 의 디렉터리 순회
+#      순서라 빌더 파일시스템이 바뀌면 뒤집힐 수 있다 (2026-09-29 리뷰). slim 타깃은 건너뛴다.
+# 알려진 한계: 실행할 때만 import 하는 의존성(예: Frame-Interpolation 의 cupy)은 1) 로 못 잡는다.
+FROM image AS node-check
+ARG SKIP_CUSTOM_NODES
+ARG PIP_LOCK_FILE=constraints/none.txt
+RUN set -e; \
+    pip freeze --all > /tmp/freeze-before.txt; \
+    cd /opt/ComfyUI; \
+    timeout 900 python main.py --cpu --quick-test-for-ci --base-directory /workspace/ComfyUI \
+        > /tmp/node-check.log 2>&1 || { tail -n 80 /tmp/node-check.log; exit 1; }; \
+    if grep -n "IMPORT FAILED" /tmp/node-check.log; then tail -n 80 /tmp/node-check.log; exit 1; fi; \
+    echo "[node-check] custom node entries loaded: $(awk '/Import times for custom nodes/,0' /tmp/node-check.log | grep -c seconds)"; \
+    pip freeze --all > /tmp/freeze-after.txt; \
+    if ! diff /tmp/freeze-before.txt /tmp/freeze-after.txt; then \
+        echo "[node-check] loading custom nodes changed /venv" >&2; exit 1; \
+    fi; \
+    if [ -z "$SKIP_CUSTOM_NODES" ] && grep -q -v -E '^[[:space:]]*(#|$)' /pip-lock.txt; then \
+        grep -v -E '^(torch|torchvision|torchaudio)==' /tmp/freeze-after.txt | sort > /tmp/lock-actual.txt; \
+        sed -E '/^[[:space:]]*(#|$)/d' /pip-lock.txt | sort > /tmp/lock-expected.txt; \
+        if ! diff /tmp/lock-expected.txt /tmp/lock-actual.txt; then \
+            echo "[lock-check] installed packages differ from ${PIP_LOCK_FILE} (regenerate: see its header)" >&2; exit 1; \
+        fi; \
+        echo "[lock-check] installed packages match ${PIP_LOCK_FILE} ($(wc -l < /tmp/lock-expected.txt) lines)"; \
+    fi; \
+    if [ -z "$SKIP_CUSTOM_NODES" ]; then \
+        python -c "import sys, onnxruntime, cv2; p = onnxruntime.get_available_providers(); \
+            contrib = hasattr(cv2, 'ximgproc'); \
+            print('[node-check] onnxruntime providers:', p, '| opencv-contrib:', contrib); \
+            sys.exit(0 if 'CUDAExecutionProvider' in p and contrib else 1)" \
+        || { echo "[node-check] onnxruntime-gpu or opencv-contrib files were overwritten by a sibling package" >&2; exit 1; }; \
+    fi; \
+    touch /node-check.ok
+
+# 최종 이미지 = 위 `image` 단계 + 검사 통과 표지. 검사 단계를 빌드에 끌어들이는 게 이 COPY 의 역할이다
+# (BuildKit 은 최종 단계가 참조하는 단계만 빌드한다). CMD·ENV 등 설정은 `image` 에서 그대로 이어받는다.
+FROM image
+COPY --from=node-check /node-check.ok /etc/meshive/node-check.ok

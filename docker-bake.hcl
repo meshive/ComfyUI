@@ -56,6 +56,14 @@ variable "COMFYUI_VERSION" {
     default = "v0.37.4"
 }
 
+# ComfyUI-Manager 커밋. 핀 사유와 `reset --hard` 방식은 Dockerfile 의 같은 이름 ARG 주석에 있다.
+# 값은 검증된 base-torch2.11.0-cu130-rc0928a 이미지에 들어간 커밋이다 (2026-09-25 "update DB", v3.42).
+# 올릴 때는 이 값을 바꾸고 빌드한다. Manager requirements 가 바뀌어 pip 해석이 실패하거나 마지막 잠금
+# 대조가 실패하면, constraints/cu130.txt 헤더의 절차로 잠금을 다시 만든다.
+variable "COMFYUI_MANAGER_SHA" {
+    default = "9c29dc68a488fd56e15f152807579009d627bfef"
+}
+
 # ⚠️ **로컬 검증 전용이다. 이걸 붙인 태그를 릴리즈로 push 하지 말 것.**
 #
 # 접미사를 붙여 라이브 태그를 안 건드리고 빌드하려는 의도였는데, 실제로는 그 접미사가
@@ -88,6 +96,7 @@ target "_common" {
         TORCH_VERSION      = TORCH_VERSION
         TORCHVISION_VERSION = TORCHVISION_VERSION
         COMFYUI_VERSION    = COMFYUI_VERSION
+        COMFYUI_MANAGER_SHA = COMFYUI_MANAGER_SHA
     }
 }
 
@@ -138,6 +147,11 @@ target "_cu130" {
         CUDA_VERSION        = "cu130"
         TORCH_VERSION       = TORCH_VERSION_CU130
         TORCHVISION_VERSION = TORCHVISION_VERSION_CU130
+        # pip 잠금 두 파일 (기반 RUN 용 / 그 아래 전체). 사유·재생성 절차는 각 파일 헤더, 둘로 나눈
+        # 이유는 Dockerfile 의 PIP_BASE_LOCK_FILE 주석. 다른 타깃은 레거시라 잠그지 않는다
+        # (Dockerfile 기본값 constraints/none.txt).
+        PIP_BASE_LOCK_FILE  = "constraints/cu130-base.txt"
+        PIP_LOCK_FILE       = "constraints/cu130.txt"
     }
 }
 
