@@ -384,7 +384,16 @@ RUN if python -c "import sys, torch, torchvision, torchaudio; \
 
 # Install code-server. 설치기가 남기는 .deb(195MB)는 이미지에 굳을 이유가 없다 —
 # 같은 RUN 에서 지워야 레이어에 안 남는다.
-RUN curl -fsSL https://code-server.dev/install.sh | sh && \
+# 버전은 docker-bake.hcl 의 CODE_SERVER_VERSION 으로 고정한다 (고정 사유·값의 출처·올리는 법은 그쪽 주석).
+#   - 기본값을 두지 않는 이유: 아래 node-check 단계도 같은 값을 쓴다. 두 곳에 적으면 올릴 때 하나가 남는다.
+#   - `:?` 가드: install.sh 는 --version 값이 비면 에러 없이 그날 최신 release 를 받는다
+#     (`VERSION=${VERSION:-$(echo_latest_version)}`, 2026-09-30 확인). 고정이 조용히 풀리지 않게 막는다.
+#   - 설치된 버전을 여기서 확인하지 않는 이유: `code-server --version` 은 실행만 해도
+#     ~/.config/code-server/config.yaml (auth: password + 무작위 비밀번호)을 새로 써서 이 레이어에 굳힌다
+#     (2026-09-30 실측). 대조는 빌드 마지막 node-check 단계가 한다.
+ARG CODE_SERVER_VERSION
+RUN : "${CODE_SERVER_VERSION:?set by docker-bake.hcl}" && \
+    curl -fsSL https://code-server.dev/install.sh | sh -s -- --version "${CODE_SERVER_VERSION}" && \
     rm -rf /root/.cache/code-server
 
 EXPOSE 22 3000 8080 8888
@@ -495,7 +504,7 @@ ENV PRESET_DOWNLOAD=${DEFAULT_PRESET_DOWNLOAD}
 CMD ["/start.sh"]
 
 # ── 빌드 마지막 검사 (별도 단계) ─────────────────────────────────────────────────────────────
-# 위 이미지를 그대로 받아 세 가지를 확인하고, 하나라도 실패하면 빌드 전체를 실패시킨다. 별도 단계에서 하는
+# 위 이미지를 그대로 받아 네 가지를 확인하고, 하나라도 실패하면 빌드 전체를 실패시킨다. 별도 단계에서 하는
 # 이유: ComfyUI 를 한 번 띄우면 로그·DB·캐시 같은 부산물이 생기는데, 그걸 이미지 레이어에 남기지 않으려는
 # 것이다. 최종 이미지는 이 단계가 만든 표지 파일 하나만 받는다 (아래 마지막 `FROM image`).
 #   1) 노드 로드: `main.py --quick-test-for-ci` 로 이미지 안 custom node 를 전부 불러 IMPORT FAILED 가
@@ -507,10 +516,15 @@ CMD ["/start.sh"]
 #      나중에 깔린 쪽 파일이 남는다. 버전이 같으면 2) 는 통과하므로, 실제로 남은 쪽을 따로 본다 — GPU 빌드의
 #      CUDAExecutionProvider 와 opencv-contrib 모듈(rc0928a 실측 상태). 설치 순서는 find 의 디렉터리 순회
 #      순서라 빌더 파일시스템이 바뀌면 뒤집힐 수 있다 (2026-09-29 리뷰). slim 타깃은 건너뛴다.
+#   4) code-server 버전: PATH 의 code-server 가 CODE_SERVER_VERSION 과 같은지 본다. install.sh 는 빌드하는 날의
+#      스크립트를 받으므로, 그 스크립트가 --version 을 다르게 다루거나 설치 방식을 바꾸면(deb 대신 standalone 등)
+#      다른 판이 깔리거나 PATH 에서 빠진다. 번들 node 가 이 베이스에서 실행되는지도 함께 확인된다. image 단계가
+#      아니라 여기서 하는 이유는 위와 같다 — `code-server --version` 도 config.yaml 을 부산물로 남긴다.
 # 알려진 한계: 실행할 때만 import 하는 의존성(예: Frame-Interpolation 의 cupy)은 1) 로 못 잡는다.
 FROM image AS node-check
 ARG SKIP_CUSTOM_NODES
 ARG PIP_LOCK_FILE=constraints/none.txt
+ARG CODE_SERVER_VERSION
 RUN set -e; \
     pip freeze --all > /tmp/freeze-before.txt; \
     cd /opt/ComfyUI; \
@@ -537,6 +551,13 @@ RUN set -e; \
             sys.exit(0 if 'CUDAExecutionProvider' in p and contrib else 1)" \
         || { echo "[node-check] onnxruntime-gpu or opencv-contrib files were overwritten by a sibling package" >&2; exit 1; }; \
     fi; \
+    cs_out=$(code-server --version 2>&1) || true; \
+    cs=$(printf '%s\n' "$cs_out" | awk '/ with Code /{print $1}'); \
+    if [ "$cs" != "${CODE_SERVER_VERSION:?set by docker-bake.hcl}" ]; then \
+        printf '%s\n' "$cs_out"; \
+        echo "[node-check] installed code-server '${cs}' differs from CODE_SERVER_VERSION ${CODE_SERVER_VERSION}" >&2; exit 1; \
+    fi; \
+    echo "[node-check] code-server ${cs} matches CODE_SERVER_VERSION"; \
     touch /node-check.ok
 
 # 최종 이미지 = 위 `image` 단계 + 검사 통과 표지. 검사 단계를 빌드에 끌어들이는 게 이 COPY 의 역할이다

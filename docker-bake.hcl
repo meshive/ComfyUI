@@ -64,6 +64,19 @@ variable "COMFYUI_MANAGER_SHA" {
     default = "9c29dc68a488fd56e15f152807579009d627bfef"
 }
 
+# code-server 버전. Dockerfile 이 install.sh 에 `--version` 으로 넘긴다. 예전에는 넘기지 않아 빌드하는 날의 최신
+# release 가 들어왔다 — 릴리스가 거의 매주 나온다 (2026-08-10 4.132.0 ~ 09-26 4.139.1 사이 8개). code-server 는
+# Pod 8080 으로 외부에 열리고 ACCESS_PASSWORD 로 비밀번호 인증을 건다 (scripts/start.sh 의 start_code_server).
+# 그래서 인증·동작이 검토 없이 바뀌면 안 된다.
+# 값은 라이브 base-torch2.11.0-cu130 (amd64 2091783d…, = rc0928a) 이미지에 실제로 든 버전이다 (2026-09-30 그 이미지의
+# code-server 레이어에서 실측: 4.139.1, Code 1.139.1).
+# Dockerfile 에는 기본값이 없다 — 설치 RUN 과 node-check 두 곳이 이 값을 쓰므로 여기 하나만 둔다.
+# 올릴 때는 이 값을 바꾸고 이미지를 다시 검증한다 (ACCESS_PASSWORD 유무별 로그인 동작 포함). 빌드 마지막 node-check
+# 단계가 설치된 버전을 이 값과 대조한다.
+variable "CODE_SERVER_VERSION" {
+    default = "4.139.1"
+}
+
 # ⚠️ **로컬 검증 전용이다. 이걸 붙인 태그를 릴리즈로 push 하지 말 것.**
 #
 # 접미사를 붙여 라이브 태그를 안 건드리고 빌드하려는 의도였는데, 실제로는 그 접미사가
@@ -97,6 +110,7 @@ target "_common" {
         TORCHVISION_VERSION = TORCHVISION_VERSION
         COMFYUI_VERSION    = COMFYUI_VERSION
         COMFYUI_MANAGER_SHA = COMFYUI_MANAGER_SHA
+        CODE_SERVER_VERSION = CODE_SERVER_VERSION
     }
 }
 
