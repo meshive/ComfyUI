@@ -20,7 +20,9 @@
 # comfy-kitchen 0.2.36)과, workflow-templates 0.11.74 가 `==` 로 요구하는 하위 패키지 3개(core 0.3.365·
 # json 0.1.100·media-assets-02 0.1.8, PyPI 메타데이터 기준)다. 새 의존성은 없다(comfy-kitchen 은 요구 목록
 # 동일, frontend 는 의존성 없음). 같은 커밋에 넣은 ComfyUI-MeshiveInjection 도 의존성이 없다. 손으로 고친
-# 것이 맞는지는 빌드 마지막 대조가 확인한다.
+# 것이 맞는지는 빌드 마지막 대조가 확인한다. → 이 잠금으로 빌드한 base-torch2.11.0-cu130-rc1002a
+# (amd64 sha256:a7193bff8e452ad6efb6d8c26e97e644d6300643c11882f5b963f8ab51254066)가 대조 283줄 통과,
+# dev RTX 5090 에서 기본 워크플로(Z-Image Turbo) 생성 통과 (2026-10-02).
 #
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
