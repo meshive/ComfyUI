@@ -48,3 +48,4 @@ https://github.com/alexopus/ComfyUI-Image-Saver.git            b4b349e553d0f4371
 https://github.com/jupo-ai/comfy-ex-tagcomplete.git            028631834bb99b9dc1fb98fa53307686c7e83b80
 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git    4d907bee61e92c2e65af3bd6383a4e4d356126d1
 https://github.com/orssorbit/ComfyUI-wanBlockswap.git          5fa2ec0fa55879fe43a33e762fff91fc2c553a67
+https://github.com/meshive/ComfyUI-MeshiveInjection.git        a8394f37d82b82c9a3acbe7abbb2355fe3f16554   # 우리 노드 v1.4.1, 2026-10-02 추가

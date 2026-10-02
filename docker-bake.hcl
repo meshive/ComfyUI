@@ -52,8 +52,18 @@ variable "TORCHVISION_VERSION_CU130" {
 #
 # v0.37.0 → v0.37.4 (2026-09-28): 패치 태그 4개(GitHub Release 는 v0.37.0 까지만 있다).
 # requirements 차이는 comfyui-workflow-templates 0.11.66→0.11.69 뿐, manager_requirements 동일.
+#
+# v0.37.4 → v0.38.2 (2026-10-02): v0.38.0 은 모델 코드 변경(H3 VAE·Qwen Image 2.1·Flux·Wan·Krea2,
+# comfy/ops.py·model_management)이 들어간 마이너 릴리스이고, v0.38.1·v0.38.2 는 유료 API 노드·템플릿뿐이다.
+# requirements 차이: frontend 1.52.7→1.53.6, workflow-templates 0.11.69→0.11.74, comfy-kitchen
+# 0.2.35→0.2.36, **torchaudio 제거**. manager_requirements 동일, 새 의존성 없음.
+# ⚠️ torchaudio 가 ComfyUI requirements 에서 빠졌지만 Dockerfile 이 torch 와 같은 버전으로 계속 설치한다
+#    (custom node 용). 위 TORCH_VERSION_CU130 의 2.11.0 상한을 풀려면 Dockerfile 쪽 torchaudio 고정부터 풀어야 한다.
+# 프론트 1.53.6 에서 우리 확장이 기대는 지점(missingModel 스토어·missing-model-* data-testid·
+# Comfy.Workflow.Draft.v2 키·createNewTemporary)이 그대로인 것을 프론트 소스 태그 대조로 확인했다.
+# 바뀐 pip 잠금 6줄은 constraints/cu130.txt 헤더에 적었다.
 variable "COMFYUI_VERSION" {
-    default = "v0.37.4"
+    default = "v0.38.2"
 }
 
 # ComfyUI-Manager 커밋. 핀 사유와 `reset --hard` 방식은 Dockerfile 의 같은 이름 ARG 주석에 있다.
