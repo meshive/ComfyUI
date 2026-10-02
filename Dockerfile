@@ -283,6 +283,7 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
 # 전파한다 — 2026-09-23 실측). 그래서 파일마다 설치하고 실패를 모아 끝에 RUN 을 실패시킨다.
 #   - 순서는 예전과 같은 `find` 순회 순서다. 정렬하지 않는다 — 같은 모듈 폴더를 공유하는 배포판
 #     (onnxruntime ↔ onnxruntime-gpu, opencv 3종)은 나중에 깔린 쪽 파일이 남으므로 순서가 결과를 바꾼다.
+#     이 순서는 빌드 머신마다 달라질 수 있어서, onnxruntime-gpu 는 루프 뒤에서 다시 깐다.
 #   - comfyui-prompt-reader-node 의 git 서브모듈 stable_diffusion_prompt_reader/requirements.txt 는
 #     건너뛴다. 독립 GUI 앱용 목록이고 `Pillow~=10.3.0` 이 cp313 휠이 없어 소스 빌드가 실패한다 — 예전
 #     빌드도 매번 여기서 조용히 실패했고 그 파일에서는 아무것도 깔리지 않았다. 노드 자체는 이미지의 Pillow
@@ -299,6 +300,16 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
             pip install --no-cache-dir --constraint /pytorch-constraints.txt -r "$req" || failed="$failed $req"; \
         done < <(find /opt/ComfyUI/custom_nodes -name requirements.txt -print0); \
         if [ -n "$failed" ]; then echo "[build] requirements install failed:$failed" >&2; exit 1; fi; \
+        # onnxruntime-gpu 파일이 남게 다시 깐다. WanVideoWrapper 의 fantasyportrait/ 가 onnxruntime-gpu 를,
+        # lynx/ 의 insightface 가 CPU onnxruntime 을 깔고 둘이 같은 onnxruntime/ 폴더를 쓴다. 그런데 두
+        # 하위 폴더의 `find` 순서는 빌드 머신의 파일시스템마다 다르다 — 2026-10-02 다른 머신에서 빌드하니
+        # lynx 가 뒤에 와서 CPU 파일이 남았고 node-check 가 잡았다(CUDAExecutionProvider 없음). 설치된 버전
+        # 그대로 --no-deps 로 덮으므로 설치 목록(잠금 대조)은 바뀌지 않고, 같은 RUN 이라 레이어에 두 번 안 남는다.
+        ort_gpu=$(pip show onnxruntime-gpu 2>/dev/null | awk '/^Version:/{print $2}'); \
+        if [ -n "$ort_gpu" ]; then \
+            echo "[build] re-asserting onnxruntime-gpu==$ort_gpu over the shared onnxruntime/ files"; \
+            pip install --no-cache-dir --no-deps --force-reinstall "onnxruntime-gpu==$ort_gpu"; \
+        fi; \
         # TensorRT 의 Windows 크로스빌드용 builder resource 를 버린다 (2026-09-22 실측
         # 1.947GB, 8개 파일: win_sm75/80/86/89/90/100/120/ptx). 리눅스 컨테이너에서
         # Windows 엔진을 굽는 경로는 존재하지 않으므로 쓰이지 않는다. **이 파일들을 만든
