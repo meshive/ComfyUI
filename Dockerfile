@@ -310,14 +310,11 @@ RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
             echo "[build] re-asserting onnxruntime-gpu==$ort_gpu over the shared onnxruntime/ files"; \
             pip install --no-cache-dir --no-deps --force-reinstall "onnxruntime-gpu==$ort_gpu"; \
         fi; \
-        # TensorRT 의 Windows 크로스빌드용 builder resource 를 버린다 (2026-09-22 실측
-        # 1.947GB, 8개 파일: win_sm75/80/86/89/90/100/120/ptx). 리눅스 컨테이너에서
-        # Windows 엔진을 굽는 경로는 존재하지 않으므로 쓰이지 않는다. **이 파일들을 만든
-        # RUN 과 같은 RUN 에서** 지워야 레이어에 안 남는다 — 다음 RUN 에서 지우면 whiteout
-        # 만 생기고 바이트는 그대로 배포된다. glob 이 안 맞아도 `rm -f` 는 0 을 반환하므로
-        # tensorrt 가 안 깔린 경우에도 안전하다.
-        rm -f /venv/lib/python*/site-packages/tensorrt_libs/libnvinfer_builder_resource_win_*.so.*; \
-    fi
+    fi && \
+    # 빌드 격리용 하위 pip(예: Impact-Pack 의 git+sam2 가 torch 를 받는다)은 위 --no-cache-dir 을 상속하지 않아
+    # PIP_CACHE_DIR 에 캐시를 쓴다 (소형 재현: 파일 174개 3.1GB). 다음 RUN 에서 지우면 레이어 바이트가 그대로
+    # 배포되므로 쓴 RUN 안에서 지운다 — 아래 install.py RUN 의 같은 정리와 짝이다.
+    rm -rf "${PIP_CACHE_DIR:?}"
 
 # install.py 도 같은 방식으로 실패를 모은다 (실행 방식·순서는 예전 `-exec python {} \;` 와 같다).
 # PIP_CONSTRAINT 를 export 하는 이유: install.py 가 서브프로세스로 부르는 pip(os.system)은 명령줄

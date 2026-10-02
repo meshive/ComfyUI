@@ -124,7 +124,6 @@ bash /download_presets.sh PRESET1,PRESET2,...
 * ComfyUI-Frame-Interpolation
 * ComfyUI-mxToolkit
 * ComfyUI-MultiGPU
-* ComfyUI_TensorRT
 * ComfyUI_UltimateSDUpscale
 * comfyui-prompt-reader-node
 * ComfyUI_essentials

@@ -296,10 +296,6 @@ SQLAlchemy==2.1.1
 stack-data==0.6.3
 stringzilla==5.1.2
 sympy==1.14.0
-tensorrt==11.3.0.99
-tensorrt_cu13==11.3.0.99
-tensorrt_cu13_bindings==11.3.0.99
-tensorrt_cu13_libs==11.3.0.99
 terminado==0.18.1
 threadpoolctl==3.7.0
 tifffile==2026.9.20

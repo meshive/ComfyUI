@@ -32,7 +32,6 @@ https://github.com/yolain/ComfyUI-Easy-Use.git                 8730ffd14044ee939
 https://github.com/Fannovel16/ComfyUI-Frame-Interpolation.git  26545cc2dd95bc3d27f056016300673bdeee78f5
 https://github.com/Smirnov75/ComfyUI-mxToolkit.git             7f7a0e584f12078a1c589645d866ae96bad0cc35
 https://github.com/pollockjj/ComfyUI-MultiGPU.git              37a73feda5804045e4f39d8c640905d62a2169d1
-https://github.com/comfyanonymous/ComfyUI_TensorRT.git         5bcc3f1e5c2424bb20bcb586e340c25ebe4a954f
 https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git         a5547db9e1d07d3318bb21e9e9c474f4c1e9c8df   # submodules
 https://github.com/receyuki/comfyui-prompt-reader-node.git     a88722ce8fe081be83d7fddb2ebe88f616b14662   # submodules
 https://github.com/cubiq/ComfyUI_essentials.git                9d9f4bedfc9f0321c19faf71855e228c93bd0dc9
