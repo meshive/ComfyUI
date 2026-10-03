@@ -57,12 +57,13 @@ const LEGACY_FLAG = "meshive.autoload.v1";
 const STATE_KEY = "meshive.autoload.v2";
 const SEEDED_DIR = "workflows/.meshive/seeded";
 const WORKFLOWS_DIR = "workflows";
-const RESTORE_GRACE_MS = 150;
 // draft 복원 완료 대기의 상한 — 복원은 보통 1초 안에 끝난다. 상한에 걸리는 경우는
 // draft 키는 있는데 복원이 실패한 형태(깨진 인덱스 등)뿐이고, 그때 캔버스는 비어
 // 있으므로 시드를 열어도 잃을 것이 없다.
 const RESTORE_SETTLE_TIMEOUT_MS = 5000;
 const RESTORE_SETTLE_POLL_MS = 100;
+// setup() 이 마커 목록을 기다리는 상한 — 이 안에 못 받으면 템플릿 창 끄기만 포기하고 진행한다.
+const MARKER_WAIT_MS = 1500;
 
 async function listSeedMarkers() {
     const res = await api.fetchApi(
@@ -103,6 +104,19 @@ function remember(slug) {
     localStorage.setItem(LEGACY_FLAG, "1");
 }
 
+// 새 브라우저 경로 전용 — 프론트엔드가 시작 탭(빈 워크플로 또는 기본 그래프)을 열 때까지 기다려 그 탭을
+// 돌려준다. 노드 수로 기다리면 안 된다: frontend 1.53.6 은 첫 방문에 **빈** 탭을 열어서 nodes>0 이
+// 오지 않고 상한(5초)을 다 헛돈다 (2026-10-03 real 5090 실측).
+async function waitForStartupTab() {
+    const deadline = performance.now() + RESTORE_SETTLE_TIMEOUT_MS;
+    while (performance.now() < deadline) {
+        const wf = app.extensionManager?.workflow?.activeWorkflow;
+        if (app.canvas && wf && !wf.isLoading) return wf;
+        await new Promise((r) => setTimeout(r, RESTORE_SETTLE_POLL_MS));
+    }
+    return null;
+}
+
 async function waitForRestoreToSettle() {
     // draft 가 있음을 안 뒤에만 부른다 — "캔버스에 뭔가 나타날 때까지"가 곧
     // "복원이 자리잡았다"다. 상한 초과는 복원 실패(빈 캔버스)이므로 그대로 진행한다.
@@ -122,10 +136,12 @@ const LOAD_RETRY_MS = 1000;
 // slug 를 기억해 버리고, 다음 로드부터는 "같은 세트"로 판단해 **영영 다시 열지 않는다.** 그래서
 // 그래프가 실제로 이 workflow 로 바뀌었는지 노드(id·type)로 확인한다. 재시도는 안전망이다 —
 // 실패할 때마다 에러 창이 하나씩 뜨므로 횟수를 작게 둔다.
-async function loadVerified(data) {
+// `workflow` 를 넘기면 **그 탭에** 연다. 안 넘기면 1.53.6 은 새 탭을 만들어, 시작 탭(빈 워크플로)이
+// 첫 번째 자리에 남고 시드는 두 번째 탭으로 밀린다.
+async function loadVerified(data, workflow = null) {
     const want = (data?.nodes ?? []).map((n) => [n.id, n.type]);
     for (let attempt = 1; attempt <= LOAD_ATTEMPTS; attempt++) {
-        await app.loadGraphData(data);
+        await app.loadGraphData(data, true, true, workflow);
         if (want.every(([id, type]) => app.graph?.getNodeById?.(id)?.type === type)) return true;
         if (attempt < LOAD_ATTEMPTS) await new Promise((r) => setTimeout(r, LOAD_RETRY_MS));
     }
@@ -142,16 +158,31 @@ app.registerExtension({
         // `getCanvas: canvas is null` 로 중단된다. 더 나쁜 건 그게 그래프 모델은 이미 바꾼 뒤에 터져서
         // 검증을 통과하고, 직후 프론트엔드의 기본 workflow 로드가 그걸 덮어쓴다는 점이다 (1.52.7,
         // 2026-09-23 로컬 실측: 새 브라우저마다 재현, 자동 열기가 한 번도 성공하지 않았다).
-        runAutoload();
+        //
+        // 예외 하나 — 마커 목록 요청(상한 MARKER_WAIT_MS)만은 기다린다. 이건 뒤 단계에 의존하지 않아
+        // 위의 교착이 없고, 프론트엔드가 시작 방식을 정하기 **전에** 끝나야 하는 일이 있다:
+        // frontend 1.53.6 은 `Comfy.TutorialCompleted` 가 없으면(새 Pod 의 설정 파일엔 늘 없다) 첫 탭을
+        // 빈 워크플로로 열고 템플릿 창을 그 위에 띄운다. 시드가 있으면 그 창이 시드를 덮을 뿐이라 끈다.
+        // 시드 없는 base pod 는 템플릿 창이 유일한 출발점이라 그대로 둔다.
+        // draft 판정도 지금 한다 — 1.53.6 은 시작 탭의 draft 를 곧바로 써서, 늦게 보면 새 브라우저를
+        // "작업이 있는 브라우저"로 오판한다.
+        const hadDrafts = hasOpenDrafts();
+        const markers = listSeedMarkers().catch(() => []);
+        const skipTemplates = markers.then(async (names) => {
+            if (!names.some((n) => !n.startsWith("bundled-"))) return;
+            const settings = app.extensionManager?.setting;
+            if (settings && !settings.get("Comfy.TutorialCompleted")) {
+                await settings.set("Comfy.TutorialCompleted", true);
+            }
+        }).catch((e) => console.warn("[meshive] could not skip template browser:", e));
+        runAutoload(markers, hadDrafts);
+        return Promise.race([skipTemplates, new Promise((r) => setTimeout(r, MARKER_WAIT_MS))]);
     },
 });
 
-async function runAutoload() {
-        // ComfyUI 의 복원(localStorage 의 이전 workflow)이 먼저 끝나게 둔다.
-        await new Promise((r) => setTimeout(r, RESTORE_GRACE_MS));
-
+async function runAutoload(markersPromise, hadDrafts) {
         try {
-            const markers = await listSeedMarkers();
+            const markers = await markersPromise;
             // 정렬한 뒤 첫 번째를 고른다. ComfyUI 의 `/userdata` 는 `glob.glob()` 결과를 정렬 없이
             // 그대로 돌려준다(app/user_manager.py, v0.37.0 에서 확인) — 즉 목록 순서는 파일시스템
             // 순서이고 보장이 없다. 세트 하나에 워크플로가 둘 이상이면(대표 `minimax-h3` + 변형
@@ -185,16 +216,16 @@ async function runAutoload() {
                 return;
             }
 
-            if (!hasOpenDrafts()) {
+            if (!hadDrafts) {
                 // 복원할 draft 가 없는 진짜 새 브라우저 — 열어 준다. 단 **바로는 아니다.**
                 // 프론트엔드 1.52.7(ComfyUI v0.37.0)에서는 setup() 150ms 시점에 캔버스가 아직
                 // 등록 전이라 loadGraphData 가 `getCanvas: canvas is null` 로 중단됐다 (2026-09-23
                 // 로컬 실측, 새 브라우저마다 재현). 에러 창은 ComfyUI-Manager 의
                 // components-manager.js 를 지목하지만 그건 loadGraphData 를 감싼 래퍼라 스택에
-                // 걸렸을 뿐이다 — 초기화가 끝난 뒤 같은 호출은 성공한다. 그래서 아래 세트 변경
-                // 경로와 똑같이 복원이 자리잡을 때까지 기다린 뒤 연다.
-                await waitForRestoreToSettle();
-                if (await loadVerified(data)) {
+                // 걸렸을 뿐이다 — 초기화가 끝난 뒤 같은 호출은 성공한다. 그래서 시작 탭이 생길
+                // 때까지 기다린 뒤 **그 탭에** 연다 — 아무도 손대지 않은 시작 탭이라 잃을 것이 없다.
+                const startupTab = await waitForStartupTab();
+                if (await loadVerified(data, startupTab)) {
                     remember(slug);
                     console.log("[meshive] auto-loaded seeded workflow:", filename);
                 } else {
