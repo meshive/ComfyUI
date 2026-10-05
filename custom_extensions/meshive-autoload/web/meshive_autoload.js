@@ -128,6 +128,21 @@ async function waitForRestoreToSettle() {
     return false;
 }
 
+// `app.loadGraphData(data, true, true, workflow)` 의 view 복원은 시작 탭에 직접 열 때 적용되지 않는다
+// (frontend 1.53.6, 2026-10-05 dev 5090 실측: canvas.ds 가 기본 뷰 [416,110]/0.9 로 남는다). 노드가
+// 원점 근처인 workflow 는 티가 안 나지만, 저장된 뷰가 먼 좌표인 workflow(LTX 2.5: y≈6500, 저장 뷰
+// offset [-1692,-6820])는 그래프가 로드됐는데 **빈 캔버스**로 보여 "기본 workflow 가 안 뜬다"가 된다.
+// 저장된 뷰가 있으면 그대로 되살린다 — 없으면 건드리지 않는다.
+function restoreSavedView(data) {
+    const ds = data?.extra?.ds;
+    const canvasDs = app.canvas?.ds;
+    if (!canvasDs || !Array.isArray(ds?.offset) || !(ds.scale > 0)) return;
+    canvasDs.offset[0] = ds.offset[0];
+    canvasDs.offset[1] = ds.offset[1];
+    canvasDs.scale = ds.scale;
+    app.canvas.setDirty(true, true);
+}
+
 const LOAD_ATTEMPTS = 2;
 const LOAD_RETRY_MS = 1000;
 
@@ -226,6 +241,7 @@ async function runAutoload(markersPromise, hadDrafts) {
                 // 때까지 기다린 뒤 **그 탭에** 연다 — 아무도 손대지 않은 시작 탭이라 잃을 것이 없다.
                 const startupTab = await waitForStartupTab();
                 if (await loadVerified(data, startupTab)) {
+                    restoreSavedView(data);
                     remember(slug);
                     console.log("[meshive] auto-loaded seeded workflow:", filename);
                 } else {
@@ -257,6 +273,7 @@ async function runAutoload(markersPromise, hadDrafts) {
                 console.warn("[meshive] createNewTemporary unavailable:", e);
             }
             await app.loadGraphData(data);
+            restoreSavedView(data);
             console.log("[meshive] asset set changed, opened seeded workflow:",
                         filename);
         } catch (e) {
