@@ -24,6 +24,12 @@
 # (amd64 sha256:a7193bff8e452ad6efb6d8c26e97e644d6300643c11882f5b963f8ab51254066)가 대조 283줄 통과,
 # dev RTX 5090 에서 기본 워크플로(Z-Image Turbo) 생성 통과 (2026-10-02).
 #
+# 2026-10-16 ComfyUI v0.38.2 → v0.41.2: 같은 방식으로 8줄만 손으로 고쳤다 — v0.41.2 requirements 의 `==` 고정
+# (frontend 1.55.17·workflow-templates 0.11.86·embedded-docs 0.5.14·comfy-kitchen 0.2.37·comfy-aimdo 0.5.6)과,
+# workflow-templates 0.11.86 이 `==` 로 요구하는 하위 패키지 중 바뀐 3개(core 0.3.377·json 0.1.112·
+# media-assets-02 0.1.16, PyPI 메타데이터 기준)다. 나머지 하위 패키지 5개는 같은 버전이다. 새 의존성은 없다
+# (comfy-kitchen·aimdo·embedded-docs·frontend 요구 목록 동일, manager_requirements 동일).
+#
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
 #     넘긴다. 직접 URL 을 constraint 로 주면, 요구하는 쪽 URL 모양이 다를 때 pip 가 ResolutionImpossible
@@ -86,20 +92,20 @@ clip-interrogator==0.6.0
 cloudpickle==3.1.2
 color-matcher==0.6.0
 colour-science==0.4.7
-comfy-aimdo==0.5.5
+comfy-aimdo==0.5.6
 comfy-angle==0.1.1
-comfy-kitchen==0.2.36
-comfyui-embedded-docs==0.5.12
-comfyui-workflow-templates-core==0.3.365
-comfyui-workflow-templates-json==0.1.100
+comfy-kitchen==0.2.37
+comfyui-embedded-docs==0.5.14
+comfyui-workflow-templates-core==0.3.377
+comfyui-workflow-templates-json==0.1.112
 comfyui-workflow-templates-media-api==0.3.84
 comfyui-workflow-templates-media-assets-01==0.1.48
-comfyui-workflow-templates-media-assets-02==0.1.8
+comfyui-workflow-templates-media-assets-02==0.1.16
 comfyui-workflow-templates-media-image==0.3.160
 comfyui-workflow-templates-media-other==0.3.229
 comfyui-workflow-templates-media-video==0.3.101
-comfyui_frontend_package==1.53.6
-comfyui_workflow_templates==0.11.74
+comfyui_frontend_package==1.55.17
+comfyui_workflow_templates==0.11.86
 comm==0.2.3
 contourpy==1.4.0
 cryptography==50.0.1

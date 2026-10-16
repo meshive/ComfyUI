@@ -62,8 +62,20 @@ variable "TORCHVISION_VERSION_CU130" {
 # 프론트 1.53.6 에서 우리 확장이 기대는 지점(missingModel 스토어·missing-model-* data-testid·
 # Comfy.Workflow.Draft.v2 키·createNewTemporary)이 그대로인 것을 프론트 소스 태그 대조로 확인했다.
 # 바뀐 pip 잠금 6줄은 constraints/cu130.txt 헤더에 적었다.
+#
+# v0.38.2 → v0.41.2 (2026-10-16): FLUX 3 Image Klein 네이티브 지원(v0.41.0, `Flux3LayoutPrompt`·
+# `ReferenceMultiLatent`·CLIPLoader type `flux3`)이 이유다. **v0.41.2 미만으로 내리면 WSB `flux3-klein`
+# 자산 세트의 동봉 workflow 가 맞지 않는다** — v0.41.0 은 템플릿 0.11.84(출시 당일 판, 모델 파일명이 다름),
+# v0.41.2 가 세트에 동봉한 판과 같은 0.11.86 을 고정한다. v0.41.1·v0.41.2 는 템플릿·유료 API 노드뿐이다.
+# requirements 차이: frontend 1.53.6→1.55.17, workflow-templates 0.11.74→0.11.86, embedded-docs
+# 0.5.12→0.5.14, comfy-kitchen 0.2.36→0.2.37, comfy-aimdo 0.5.5→0.5.6. manager_requirements 동일, 새 의존성 없음.
+# 프론트 1.55.17 에서 우리 확장이 기대는 지점(missingModel 스토어·missing-model-* data-testid·
+# Comfy.Workflow.Draft.v2 키·createNewTemporary·Comfy.TutorialCompleted 시작 분기)이 그대로인 것을 프론트 소스
+# 태그 대조로 확인했다. missingModel 스토어에 표시용 visibleMissingModelCandidates(경고 끄기 설정)가 생겼지만
+# 우리가 읽는 missingModelCandidates 는 그대로이고, 행 컴포넌트 MissingModelRow.vue 는 바뀌지 않았다.
+# 바뀐 pip 잠금 8줄은 constraints/cu130.txt 헤더에 적었다.
 variable "COMFYUI_VERSION" {
-    default = "v0.38.2"
+    default = "v0.41.2"
 }
 
 # ComfyUI-Manager 커밋. 핀 사유와 `reset --hard` 방식은 Dockerfile 의 같은 이름 ARG 주석에 있다.
