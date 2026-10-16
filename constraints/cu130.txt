@@ -29,6 +29,10 @@
 # workflow-templates 0.11.86 이 `==` 로 요구하는 하위 패키지 중 바뀐 3개(core 0.3.377·json 0.1.112·
 # media-assets-02 0.1.16, PyPI 메타데이터 기준)다. 나머지 하위 패키지 5개는 같은 버전이다. 새 의존성은 없다
 # (comfy-kitchen·aimdo·embedded-docs·frontend 요구 목록 동일, manager_requirements 동일).
+# → 이 잠금으로 빌드한 base-torch2.11.0-cu130-rc1016a (index sha256:311c112f2126a09aac402145ca1c50dc0c8f5481ad58c55ec1ea3cd4c7023661,
+# amd64 sha256:5f9ee9b55f84f93aa0ba1f52c8613ad92d425f134bf1539dec7340fdd4fdbd89)가 대조 279줄 통과, real RTX 5090 에서
+# FLUX 3 Image Klein t2i 생성 통과(MeshiveInjection 으로 gated 모델 4개 받기 포함, 1024² 50 steps 11.2초) (2026-10-16).
+# 기존 팩 워크플로 27개는 v0.41.2 의 /object_info 대조(노드 존재·deprecated·로더 선택값)로만 확인했고 실제 생성 회귀는 하지 않았다.
 #
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
