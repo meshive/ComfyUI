@@ -74,8 +74,19 @@ variable "TORCHVISION_VERSION_CU130" {
 # 태그 대조로 확인했다. missingModel 스토어에 표시용 visibleMissingModelCandidates(경고 끄기 설정)가 생겼지만
 # 우리가 읽는 missingModelCandidates 는 그대로이고, 행 컴포넌트 MissingModelRow.vue 는 바뀌지 않았다.
 # 바뀐 pip 잠금 8줄은 constraints/cu130.txt 헤더에 적었다.
+#
+# v0.41.2 → v0.42.1 (2026-10-21): MOSS-Image 네이티브 지원(v0.42.0, ComfyUI#17095·#17099 — CLIPLoader type
+# `moss_image`·`MOSSImageLayoutPrompt`)이 이유다. **v0.42.0 미만으로 내리면 WSB `moss-image` 자산 세트가
+# 열리지 않는다.** v0.42.1 은 MOSS 템플릿 실행 중 크래시 수정(#17169 TextGenerate 정리·#17178)이 더 들어간 판이다.
+# 2026-10-18 rc1018a 는 이 값을 master `c06bf5f5` 로 덮어써 빌드했고 레포에는 남기지 않았다. v0.42.1 은 그 커밋을
+# 포함한다(그 뒤 10커밋). requirements 차이: frontend 1.55.17→1.55.18, workflow-templates 0.11.86→0.11.89,
+# comfy-kitchen 0.2.37→0.2.39. manager_requirements 동일, 새 의존성 없음. 프론트 1.55.18 은 billing 백포트 1건
+# (#21222)과 locale 뿐이라 우리 확장이 기대는 지점은 그대로다.
+# ⚠️ workflow-templates 0.11.89 의 FLUX 3 Klein 템플릿 4개는 새 하이픈 파일명(`flux3-image-klein-int8-convrot`
+#    등, workflow_templates#1353)을 가리킨다. WSB `flux3-klein` 세트는 0.11.86 판(밑줄 이름)이다. 세트에 동봉한
+#    workflow 는 맞지만, 템플릿 창에서 내장 Klein 템플릿을 열면 모델 누락으로 보인다(rc1018a 부터 이미 같은 상태).
 variable "COMFYUI_VERSION" {
-    default = "v0.41.2"
+    default = "v0.42.1"
 }
 
 # ComfyUI-Manager 커밋. 핀 사유와 `reset --hard` 방식은 Dockerfile 의 같은 이름 ARG 주석에 있다.
