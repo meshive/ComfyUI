@@ -39,6 +39,11 @@
 # 요구하는 하위 패키지 중 바뀐 3개(core 0.3.380·json 0.1.115·media-assets-02 0.1.17, PyPI 메타데이터 기준)다.
 # 나머지 하위 패키지 5개는 같은 버전이다. 새 의존성은 없다(comfy-kitchen 요구 목록·휠 태그 동일, frontend 는
 # 의존성 없음, manager_requirements 동일).
+# → 이 잠금으로 b60215a 를 깨끗이 꺼내 빌드한 base-torch2.11.0-cu130-rc1021a (index sha256:fd24f3a2eb5472af630fff91d03105c7e0a7b2364f93aaac60f53176cd5d5959,
+# amd64 sha256:a2b33083f408070d18a3c58fa92bdaa0fe193d566998003e1ea2875d7ea34912)가 대조 279줄 통과, dev RTX 5090 에서
+# MOSS-Image 생성 통과 (2026-10-21). Quick Deploy 로 세트를 받은 Pod 를 rc1021a 커스텀 템플릿으로 옮겨 시드 workflow 2개
+# (t2i·layout)와 upstream 86ce86e9 판 2개(TE·VAE 파일명만 세트 파일로 바꿈 — 예시 박스 레이아웃 포함)를 돌렸다.
+# 다른 팩의 실제 생성 회귀는 하지 않았다.
 #
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
