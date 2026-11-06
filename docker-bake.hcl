@@ -85,29 +85,90 @@ variable "TORCHVISION_VERSION_CU130" {
 # ⚠️ workflow-templates 0.11.89 의 FLUX 3 Klein 템플릿 4개는 새 하이픈 파일명(`flux3-image-klein-int8-convrot`
 #    등, workflow_templates#1353)을 가리킨다. WSB `flux3-klein` 세트는 0.11.86 판(밑줄 이름)이다. 세트에 동봉한
 #    workflow 는 맞지만, 템플릿 창에서 내장 Klein 템플릿을 열면 모델 누락으로 보인다(rc1018a 부터 이미 같은 상태).
+#
+# v0.42.1 → v0.44.1 (2026-11-06): 최신 GitHub Release 는 v0.44.0(2026-11-04)이다. v0.44.1(2026-11-06, 49b61c3c)은
+# release/v0.44 브랜치에 찍힌 패치 태그로 v0.44.0 의 후손이고 GitHub Release 는 없다. v0.44.1 을 쓰는 이유는 최신
+# 태그라서다 — v0.44.0 과의 차이는 API 파트너 노드(comfy_api_nodes 의 Pika·Kling·Gemini·OpenAI·Qwen·Tencent HY LLM,
+# node_id 는 추가만)와 requirements 의 workflow-templates 0.11.101→0.11.103 뿐이다. core·CLI 인자·
+# manager_requirements.txt 는 v0.44.0 과 같다. 시드 workflow 의 출처 템플릿 28개 중 0.11.101→0.11.103 에서 바뀐 것은
+# MOSS 2개(t2i·bboxes)와 qwen_image_edit_2509 뿐이고, 그것도 MarkdownNote 의 링크(ModelScope 저장소·입력 이미지)만
+# 더해졌다 — 모델·노드·위젯은 같고, 시드 동봉 workflow 는 바이트 고정이라 영향이 없다.
+# v0.42.2~v0.42.5·v0.43.1·v0.43.2 도 사이드 브랜치에만 찍힌 패치 태그라 v0.44.0 의 조상이 아니지만, 그 커밋의 PR 은
+# 전부 v0.44.0 에 들어 있다.
+# requirements 차이(v0.42.1 → v0.44.1): frontend 1.55.18→1.57.6, workflow-templates 0.11.89→0.11.103, embedded-docs
+# 0.5.14→0.5.16, comfy-kitchen 0.2.39→0.2.40, comfy-aimdo 0.5.6→0.6.0, `Pillow`→`Pillow>=10.1.0`(하한만 — 잠긴
+# 12.3.0 이 만족). 새 의존성 없음, torch 줄 그대로. v0.44.0 이 kitchen 의 새 함수(group_norm_stats3d)와 aimdo 의 새 API
+# (write_device_to_file)를 부르므로 두 패키지는 짝을 맞춰야 한다. manager_requirements.txt 는 여전히
+# comfyui_manager==4.2.2 지만 이 이미지는 그 파일을 쓰지 않는다(아래 COMFYUI_MANAGER_VERSION). 새로 생긴
+# agent_requirements.txt 는 `--enable-agent` 일 때만 쓰여 깔지 않는다. CLI 인자는 `--enable-agent`·
+# `--disable-product-tips` 추가뿐이고 삭제된 node_id 도 없다. 바뀐 pip 잠금 줄은 constraints/cu130.txt 헤더에 적었다.
+# ⚠️ 같은 seed 라도 결과가 달라지는 세트가 있다 (예상된 변화):
+#    - Flux2 VAE(헤더에 `bn.running_mean` 이 있는 VAE)가 kitchen 융합 경로를 타고(#17196) 기본 작업 dtype 이
+#      fp16 우선이 된다(RTX 5090 에서 bf16→fp16) — flux2-dev·flux2-klein-4b·flux3-klein·moss-image. VAEComputeDtype
+#      노드나 `--bf16-vae` 로 dtype 은 되돌릴 수 있지만 융합 경로는 남아 v0.42.1 과 비트 단위로 같아지지 않는다.
+#    - TextGenerate 의 top-p 경계 수정(#17221)과 MTP auto 의 tree 조정(#17273) — sampling 을 켠 TextGenerate
+#      (moss-image·qwen-image-2.1 t2i/edit·krea2-turbo)와 TextGenerateLTX2Prompt(ltx-2.5)의 프롬프트 확장 결과가
+#      달라진다. flux3-klein 은 top_k 1·mtp off 라 영향이 없다.
+# TextGenerate 는 TextGenerateV2(#17492)가 생기며 "Generate Text (DEPRECATED)"(is_deprecated) 로 남는다. 등록된
+# 노드라 자동 교체는 없고 표시만 바뀐다 — 시드 workflow 6개가 이 노드를 쓴다.
+# 프론트 1.57.6 에서 우리 확장이 기대는 지점(missingModel 스토어·missing-model-* data-testid·Comfy.Workflow.Draft.v2
+# 키·createNewTemporary·Comfy.TutorialCompleted 시작 분기·actionBarButtons)이 그대로인 것을 프론트 소스 태그 대조로
+# 확인했다. 달라진 점: toast 가 design-system toast 로 바뀌고 extensionManager.toast.add 는 레거시 shim 으로 남는다
+# (동작함), 노드 properties.models 의 `directory: null` 항목을 프론트가 버린다(zDeclaredModelFile). 또 client_id 없는
+# /prompt 를 한 번 받으면 유저 폴더에 used_headlessly 표지가 생기고 run bar 에 'Deploy to Comfy API' 버튼이 뜬다
+# (서버 플래그 deploy_to_cloud — `--feature-flag` 로 못 끈다). 이 버튼은 손대지 않았다. 기동 로그의 Comfy Org 제품 안내
+# 줄(product tips)은 Dockerfile 런타임 ENV 의 COMFYUI_DISABLE_PRODUCT_TIPS=1 로 끈다.
+# master 는 v0.44.0 뒤 frontend 1.58.5 를 고정했다(다음 릴리스). v0.44.1 은 v0.44.0 과 같은 1.57.6 이고 그대로 쓴다.
 variable "COMFYUI_VERSION" {
-    default = "v0.42.1"
+    default = "v0.44.1"
 }
 
-# ComfyUI-Manager 커밋. 핀 사유와 `reset --hard` 방식은 Dockerfile 의 같은 이름 ARG 주석에 있다.
-# 값은 검증된 base-torch2.11.0-cu130-rc0928a 이미지에 들어간 커밋이다 (2026-09-25 "update DB", v3.42).
-# 올릴 때는 이 값을 바꾸고 빌드한다. Manager requirements 가 바뀌어 pip 해석이 실패하거나 마지막 잠금
-# 대조가 실패하면, constraints/cu130.txt 헤더의 절차로 잠금을 다시 만든다.
-variable "COMFYUI_MANAGER_SHA" {
-    default = "9c29dc68a488fd56e15f152807579009d627bfef"
+# 내장 ComfyUI-Manager(pip 패키지 comfyui_manager) 버전. Dockerfile 이 ComfyUI 와 같은 RUN 에서
+# `comfyui_manager==<이 값>` 으로 깔고, post_start.sh 가 `--enable-manager` 로 켠다.
+#
+# 2026-11-06 전에는 레거시 ComfyUI-Manager v3.42 를 custom node 로 clone 했다(COMFYUI_MANAGER_SHA 9c29dc68,
+# rc0928a 검증 커밋). 지금 ComfyUI 는 Manager 를 이 pip 패키지로 내장한다. `--enable-manager` 로 띄우면 이름에
+# 'comfyui-manager' 가 든 레거시 사본은 폴더 이름만으로 로드가 막힌다(comfyui_manager.should_be_disabled, 로그는
+# INFO 'Blocked by policy' 한 줄) — 유저 볼륨에 남은 옛 사본도 마찬가지다.
+#
+# **4.2.2(ComfyUI v0.44.1 의 manager_requirements.txt 고정값, v0.44.0 과 같다)가 아니라 4.3 인 이유:**
+#   - Pod 의 ComfyUI 는 `--listen`(0.0.0.0,::) 이라 Manager 가 비-loopback 으로 본다. 4.2.2 새 UI 의 노드 설치는 맨 앞
+#     'middle+' 검사에서 network_mode=personal_cloud 가 아니면 **전부** 막힌다(glob/manager_server.py do_install).
+#     4.3 은 stable CNR 설치만 'middle' 로 내려 허용한다. nightly 설치·Registry 에 없는(git) 노드 설치, update all,
+#     스냅샷 복원은 4.3 도 'middle+' 다. v3.42 는 update all·스냅샷 복원을 'middle' 로, nightly·git 노드 설치를 노드 DB 기준
+#     위험도로 허용했다. 같은 수준으로 쓰려고 post_start.sh 와 옛 경로 shim 이 /seed_manager_config.py 로 config.ini 에
+#     network_mode=personal_cloud 를 시드한다 (Git URL 직접 설치·pip 설치는 allow_* 플래그가 따로 필요하고 새 UI 에는 그
+#     화면이 없다).
+#   - 보안 수정 #3297(레거시 UI HTML/URL 주입 방지, 관리자 설정 보존)·#3299(비-loopback 리스너의 flagged CNR 설치 제한)가
+#     4.3 에만 있다. v3.42 에 이미 든 #3296·#3298 의 v4 판이라, 4.2.2 로 가면 지금보다 보안 수정이 빠진다.
+#   - upstream 의 핀 상향 PR(Comfy-Org/ComfyUI#16410, 4.2.2→4.3)은 아직 머지되지 않았다(2026-11-06 OPEN).
+# 4.3 의존성은 4.2.2 와 같고 packaging·nh3>=0.3.7 만 더한다 — 전부 잠금에 이미 있다.
+# ComfyUI 는 Manager 버전을 검사하지 않는다(main.py 는 find_spec('comfyui_manager') 만 본다).
+# 올릴 때는 이 값과 constraints/cu130.txt 의 comfyui-manager 줄을 같이 바꾸고 이미지를 다시 검증한다.
+variable "COMFYUI_MANAGER_VERSION" {
+    default = "4.3"
 }
 
 # code-server 버전. Dockerfile 이 install.sh 에 `--version` 으로 넘긴다. 예전에는 넘기지 않아 빌드하는 날의 최신
 # release 가 들어왔다 — 릴리스가 거의 매주 나온다 (2026-08-10 4.132.0 ~ 09-26 4.139.1 사이 8개). code-server 는
 # Pod 8080 으로 외부에 열리고 ACCESS_PASSWORD 로 비밀번호 인증을 건다 (scripts/start.sh 의 start_code_server).
 # 그래서 인증·동작이 검토 없이 바뀌면 안 된다.
-# 값은 라이브 base-torch2.11.0-cu130 (amd64 2091783d…, = rc0928a) 이미지에 실제로 든 버전이다 (2026-09-30 그 이미지의
-# code-server 레이어에서 실측: 4.139.1, Code 1.139.1).
+# 처음 고정한 4.139.1 은 라이브 base-torch2.11.0-cu130 (amd64 2091783d…, = rc0928a) 이미지에 실제로 든 버전이었다
+# (2026-09-30 그 이미지의 code-server 레이어에서 실측: 4.139.1, Code 1.139.1).
+#
+# 4.139.1 → 4.145.0 (2026-11-06): 사이 릴리스 6개(4.140.0~4.145.0). 올린 이유는 보안 수정이다 — 8080 이 Pod 밖으로 열린다.
+#   - 4.141.1: 번들 Node.js 를 24.22.1 로 올려 Brotli 디코더 원격 코드 실행 버그(CVE-2026-111497)를 고쳤고, 압축된
+#     요청 본문(Content-Encoding br·gzip·deflate)은 풀지 않고 거부한다.
+#   - 4.145.0: 내장 프록시로 가는 웹소켓 요청에서도 code-server 쿠키를 지우고(HTTP 요청은 이미 지웠다), 쿠키에 HttpOnly 를
+#     붙여 프록시된 앱의 JS 가 쿠키를 읽지 못하게 했다.
+# 동작 변경: 4.141.1 부터 `--flag=false` 형태와 설정 파일의 불리언 false 가 실제로 적용된다(start.sh 는 이 형태를 안 쓴다).
+# 4.144.0 은 웹소켓 origin 검사에서 host 에 포트가 없으면 X-Forwarded-Port 로 폴백하고 기본 포트(:443)를 같게 본다 —
+# 템플릿은 8080 직결이지만 이미지 nginx(8081)는 X-Forwarded-Port 를 붙이므로 그 경로의 터미널·에디터 WS 도 확인한다.
 # Dockerfile 에는 기본값이 없다 — 설치 RUN 과 node-check 두 곳이 이 값을 쓰므로 여기 하나만 둔다.
 # 올릴 때는 이 값을 바꾸고 이미지를 다시 검증한다 (ACCESS_PASSWORD 유무별 로그인 동작 포함). 빌드 마지막 node-check
 # 단계가 설치된 버전을 이 값과 대조한다.
 variable "CODE_SERVER_VERSION" {
-    default = "4.139.1"
+    default = "4.145.0"
 }
 
 # ⚠️ **로컬 검증 전용이다. 이걸 붙인 태그를 릴리즈로 push 하지 말 것.**
@@ -142,7 +203,7 @@ target "_common" {
         TORCH_VERSION      = TORCH_VERSION
         TORCHVISION_VERSION = TORCHVISION_VERSION
         COMFYUI_VERSION    = COMFYUI_VERSION
-        COMFYUI_MANAGER_SHA = COMFYUI_MANAGER_SHA
+        COMFYUI_MANAGER_VERSION = COMFYUI_MANAGER_VERSION
         CODE_SERVER_VERSION = CODE_SERVER_VERSION
     }
 }

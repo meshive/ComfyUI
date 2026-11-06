@@ -45,6 +45,28 @@
 # (t2i·layout)와 upstream 86ce86e9 판 2개(TE·VAE 파일명만 세트 파일로 바꿈 — 예시 박스 레이아웃 포함)를 돌렸다.
 # 다른 팩의 실제 생성 회귀는 하지 않았다.
 #
+# 2026-11-06 ComfyUI v0.42.1 → v0.44.1 + 내장 Manager(comfyui_manager 4.3) 전환 + comfy-ex-tagcomplete 제거: 이번에도
+# "다시 만드는 법" 1)~2) 의 잠금 없는 빌드를 건너뛰고 손으로 고쳤다 (279줄 → 271줄).
+#   - 바꾼 8줄: v0.44.1 requirements 의 `==` 고정(frontend 1.57.6·workflow-templates 0.11.103·embedded-docs 0.5.16·
+#     comfy-kitchen 0.2.40·comfy-aimdo 0.6.0)과, workflow-templates 0.11.103 이 `==` 로 요구하는 하위 패키지 중 바뀐 3개
+#     (core 0.3.394·json 0.1.129·media-assets-02 0.1.29). 나머지 하위 패키지 5개는 같은 버전이다. 새로 생긴 `Pillow>=10.1.0`
+#     은 잠긴 pillow 12.3.0 이 만족한다. 새 판들의 Requires-Dist 는 비었거나(frontend·embedded-docs·aimdo·하위 3개) 예전과
+#     같다(kitchen 은 extra 만, workflow-templates 는 같은 하위 패키지 8개를 `==` 로) — PyPI JSON 과 휠 METADATA(PEP 658) 기준.
+#     v0.44.1 의 requirements 는 v0.44.0 과 workflow-templates 줄(0.11.101 → 0.11.103)만 다르다 — v0.44.0 으로 내리면
+#     이 4줄을 0.11.101 판(core 0.3.392·json 0.1.127·media-assets-02 0.1.27)으로 같이 바꿔야 한다.
+#   - 더한 1줄: comfyui-manager==4.3 (휠 METADATA 의 Name 표기 그대로). 의존성(GitPython·PyGithub·transformers·
+#     huggingface-hub>0.20·typer·rich·typing-extensions·toml·uv·chardet·packaging·nh3>=0.3.7)은 전부 이미 잠겨 있다.
+#   - 뺀 9줄: matrix-nio·aiofiles·aiohttp_socks·python-socks·h2·hpack·hyperframe·pycryptodome·unpaddedbase64. 레거시
+#     ComfyUI-Manager v3.42(9c29dc68)의 requirements 에만 있던 matrix-nio 와 그것만 끌어오던 하위 패키지다. 4.3 의 의존성은
+#     v3.42 에서 matrix-nio 하나만 빠진 목록이라 nh3·packaging 은 남는다. 판정 방법: 빌드가 까는 시작점(기반 RUN 목록, torch 셋
+#     메타데이터, ComfyUI requirements, comfyui-manager, 고정 SHA 의 custom node requirements.txt 전부(하위 폴더 포함)·
+#     Frame-Interpolation install.py 가 까는 requirements-no-cupy.txt·Impact-Pack 의 SAM-2, onnxruntime-gpu 재설치)에서 잠긴
+#     판의 PyPI requires_dist(extra·marker 반영, iopath 는 sdist 라 setup.py)를 따라가 닿지 않는 줄을 찾았다. v0.44.1
+#     requirements 로 돌린 결과 271줄이 전부 닿고, 닿는 요구의 버전 조건도 잠긴 판이 모두 만족한다. 같은 방법을
+#     예전 구성(v0.42.1 + 레거시 Manager)에 돌리면 279줄이 전부 닿아, tagcomplete 가 혼자 끌어오던 패키지는 없다(Comfy
+#     Registry 의 3.x 판 dependencies 도 비어 있다). 확정은 3) 의 잠금 빌드 대조가 한다 — `<` 나 `>` 줄이 나오면 원인부터 본다.
+#   → 검증 이미지 기록은 빌드 뒤 여기에 추가한다.
+#
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
 #     넘긴다. 직접 URL 을 constraint 로 주면, 요구하는 쪽 URL 모양이 다를 때 pip 가 ResolutionImpossible
@@ -74,10 +96,8 @@
 #      이것이 배포되는 바이트다. 위 "무엇이 들어 있나" 의 기준 이미지도 고친다.
 #
 accelerate==1.15.0
-aiofiles==25.1.0
 aiohappyeyeballs==2.7.1
 aiohttp==3.14.3
-aiohttp_socks==0.12.0
 aiosignal==1.4.0
 albucore==0.0.24
 albumentations==2.0.8
@@ -107,20 +127,21 @@ clip-interrogator==0.6.0
 cloudpickle==3.1.2
 color-matcher==0.6.0
 colour-science==0.4.7
-comfy-aimdo==0.5.6
+comfy-aimdo==0.6.0
 comfy-angle==0.1.1
-comfy-kitchen==0.2.39
-comfyui-embedded-docs==0.5.14
-comfyui-workflow-templates-core==0.3.380
-comfyui-workflow-templates-json==0.1.115
+comfy-kitchen==0.2.40
+comfyui-embedded-docs==0.5.16
+comfyui-manager==4.3
+comfyui-workflow-templates-core==0.3.394
+comfyui-workflow-templates-json==0.1.129
 comfyui-workflow-templates-media-api==0.3.84
 comfyui-workflow-templates-media-assets-01==0.1.48
-comfyui-workflow-templates-media-assets-02==0.1.17
+comfyui-workflow-templates-media-assets-02==0.1.29
 comfyui-workflow-templates-media-image==0.3.160
 comfyui-workflow-templates-media-other==0.3.229
 comfyui-workflow-templates-media-video==0.3.101
-comfyui_frontend_package==1.55.18
-comfyui_workflow_templates==0.11.89
+comfyui_frontend_package==1.57.6
+comfyui_workflow_templates==0.11.103
 comm==0.2.3
 contourpy==1.4.0
 cryptography==50.0.1
@@ -151,15 +172,12 @@ gguf==0.19.0
 gitdb==4.0.12
 GitPython==3.1.62
 h11==0.16.0
-h2==4.4.1
 hf-xet==1.6.0
 hf_transfer==0.1.9
-hpack==4.2.0
 httpcore==1.0.9
 httpx==0.28.1
 huggingface_hub==1.33.0
 hydra-core==1.3.7
-hyperframe==6.1.0
 idna==3.20
 ImageIO==2.37.4
 imageio-ffmpeg==0.6.0
@@ -200,7 +218,6 @@ markdown-it-py==4.2.0
 MarkupSafe==3.0.3
 matplotlib==3.11.2
 matplotlib-inline==0.2.2
-matrix-nio==0.26.0
 mdurl==0.1.2
 mistune==3.3.4
 ml_dtypes==0.6.0
@@ -266,7 +283,6 @@ ptyprocess==0.7.0
 pure_eval==0.2.4
 py-cpuinfo==9.0.0
 pycparser==3.0
-pycryptodome==3.23.0
 pydantic==2.13.5
 pydantic-settings==2.15.0
 pydantic_core==2.46.5
@@ -283,7 +299,6 @@ PySocks==1.7.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
 python-json-logger==4.2.0
-python-socks==3.1.1
 PyYAML==6.0.3
 pyzmq==27.2.0
 referencing==0.37.0
@@ -339,7 +354,6 @@ tzdata==2026.4
 ultralytics==8.4.164
 ultralytics-platform==0.1.65
 ultralytics-thop==2.2.1
-unpaddedbase64==2.1.0
 uri-template==1.3.0
 urllib3==2.8.0
 uv==0.12.19

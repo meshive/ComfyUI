@@ -181,14 +181,14 @@ RUN python -c "import torch, torchvision, torchaudio; \
     open('/pytorch-constraints.txt', 'w').write( \
         f'torch=={torch.__version__}\ntorchvision=={torchvision.__version__}\ntorchaudio=={torchaudio.__version__}\n')"
 
-# 전체 pip 잠금 — ComfyUI·Manager requirements, custom node requirements, install.py 안의 pip 에 적용되고,
+# 전체 pip 잠금 — ComfyUI requirements·내장 Manager, custom node requirements, install.py 안의 pip 에 적용되고,
 # 빌드 마지막 검사 단계가 설치 목록 전체를 이 파일과 대조한다. torch 아래에 두는 이유는 위 기반 잠금 주석.
 ARG PIP_LOCK_FILE=constraints/none.txt
 COPY ${PIP_LOCK_FILE} /pip-lock.txt
 RUN sed -E '/^[[:space:]]*(#|$)/d; / @ /d' /pip-lock.txt > /pip-constraints.txt && \
     echo "[build] pip lock ${PIP_LOCK_FILE}: $(wc -l < /pip-constraints.txt) constraints"
 
-# Install ComfyUI and ComfyUI Manager.
+# Install ComfyUI and the built-in ComfyUI-Manager (pip package comfyui_manager).
 # 앱 코드는 /opt/ComfyUI — **볼륨이 붙는 자리(/workspace) 밖**에 둔다. 데이터 폴더(models·input·output·
 # user·custom_nodes)는 여전히 /workspace/ComfyUI 이고, post_start.sh 가 `--base-directory` 로 ComfyUI 에
 # 알려 준다. 템플릿 semantic path 선언(WSB seed_k8s_templates.py)이 전부 그 데이터 폴더 아래라 플랫폼 쪽은
@@ -210,31 +210,28 @@ RUN sed -E '/^[[:space:]]*(#|$)/d; / @ /d' /pip-lock.txt > /pip-constraints.txt 
 # to track the tip instead.
 # 선언이 여기 있으므로 이 값을 올려도 위쪽(apt/uv/python/torch) 캐시는 살아있다.
 ARG COMFYUI_VERSION=v0.37.4
-# ComfyUI-Manager 도 커밋을 고정한다. 예전에는 기본 브랜치 HEAD 를 받았다.
-#   - 왜: 2026-09-23 하루에 빌드 4번이 서로 다른 커밋을 받았고(16989582 → 30fc9660 → db76cf00 → 73bbe810),
-#     같이 낼 cu128/cu130 후보끼리도 달랐다. 그날 차이는 노드 DB 뿐이었지만, 9/18 에는 보안 관련 동작 변경
-#     (#3298 비-loopback 리스너의 flagged 노드 설치 제한, #3296 UI 인젝션 수정)이 검토 없이 따라 들어왔다.
-#   - 값: 검증된 rc0928a 이미지에 실제로 들어간 커밋이다 (그 이미지 안에서 `git rev-parse HEAD`).
-#   - `reset --hard` 인 이유는 custom_nodes.txt 와 같다. 브랜치(main)에 붙은 채 upstream 보다 뒤인 평범한
-#     상태라 pod 안에서 Manager 의 자기 업데이트(`git pull`)가 그대로 된다. detach 하면 Manager 는 "항상
-#     업데이트 있음"으로 보고, 업데이트할 때 기본 브랜치로 강제 전환한다 (manager_core.py).
-#   - URL 은 ltdrdata 그대로 둔다. repo 는 Comfy-Org 로 옮겨져 GitHub 리다이렉트로 받는다. 그래도 Manager
-#     노드 DB 의 자기 항목이 ltdrdata URL 이고, 이미지 안 .git/config 도 검증본과 같게 유지된다. 리다이렉트가
-#     끊겨 다른 repo 를 받게 되면 그 repo 에 이 SHA 가 없어 빌드가 멈춘다.
-#   - 올릴 때: docker-bake.hcl 의 COMFYUI_MANAGER_SHA 를 바꾸고 이미지를 다시 검증한다.
-ARG COMFYUI_MANAGER_SHA=9c29dc68a488fd56e15f152807579009d627bfef
-RUN export PIP_CONSTRAINT=/pip-constraints.txt && \
+# ComfyUI-Manager 는 ComfyUI 내장 Manager(pip 패키지 comfyui_manager)를 같은 RUN 에서 깐다. 켜는 것은 실행 인자
+# `--enable-manager` 다 (post_start.sh·compat shim·아래 node-check) — 프론트는 system_stats 의 argv 에 그 원소가
+# 정확히 있어야 Manager 메뉴를 보여 준다.
+#   - 버전은 docker-bake.hcl 의 COMFYUI_MANAGER_VERSION 으로 고정한다 (4.2.2 가 아니라 4.3 인 이유도 그쪽 주석).
+#   - ComfyUI 의 manager_requirements.txt 는 쓰지 않는다. v0.44.1(v0.44.0 도 같다)은 그 파일에서 comfyui_manager==4.2.2 를
+#     고정하므로, 그 파일을 깔면 잠금(comfyui-manager==4.3)·이 값과 충돌해 pip 해석이 실패한다.
+#   - 잠금을 켠 RUN 이라 이 값과 constraints/cu130.txt 의 comfyui-manager 줄이 다르면 pip 해석이 실패한다 — 올릴 때 둘을
+#     같이 바꾼다.
+#   - 기본값을 두지 않는다 (code-server 와 같은 `:?` 가드). 비면 `comfyui_manager==` 가 되어 이상한 오류로 죽는다.
+#   - 이력: 2026-11-06 전에는 레거시 ComfyUI-Manager v3.42 를 custom_nodes/ComfyUI-Manager 로 clone 하고 커밋
+#     (COMFYUI_MANAGER_SHA 9c29dc68)에 `reset --hard` 했다. 2026-09-23 하루에 빌드 4번이 서로 다른 Manager 커밋을 받은 뒤
+#     고정했던 것이다. 레거시 clone·그 requirements(matrix-nio 포함) 설치는 이 RUN 에서 뺐다.
+ARG COMFYUI_MANAGER_VERSION
+RUN : "${COMFYUI_MANAGER_VERSION:?set by docker-bake.hcl}" && \
+    export PIP_CONSTRAINT=/pip-constraints.txt && \
     git clone https://github.com/comfyanonymous/ComfyUI.git /opt/ComfyUI && \
     cd /opt/ComfyUI && \
     git checkout "${COMFYUI_VERSION}" && \
     echo "ComfyUI pinned to ${COMFYUI_VERSION} ($(git rev-parse --short HEAD))" && \
     mkdir -p user && \
     pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt && \
-    git clone https://github.com/ltdrdata/ComfyUI-Manager.git custom_nodes/ComfyUI-Manager && \
-    git -C custom_nodes/ComfyUI-Manager reset --hard --quiet "${COMFYUI_MANAGER_SHA}" && \
-    echo "ComfyUI-Manager pinned to $(git -C custom_nodes/ComfyUI-Manager rev-parse --short HEAD)" && \
-    cd custom_nodes/ComfyUI-Manager && \
-    pip install --no-cache-dir --constraint /pytorch-constraints.txt -r requirements.txt
+    pip install --no-cache-dir --constraint /pytorch-constraints.txt "comfyui_manager==${COMFYUI_MANAGER_VERSION}"
 
 COPY custom_nodes.txt /custom_nodes.txt
 
@@ -425,6 +422,8 @@ COPY --chmod=755 scripts/post_start.sh /
 COPY --chmod=755 scripts/download_presets.sh /
 COPY --chmod=755 scripts/install_custom_nodes.sh /
 COPY --chmod=755 scripts/ensure_pytorch_stack.sh /
+# 내장 Manager config.ini 의 network_mode 시드. post_start.sh 와 옛 경로 shim(아래 /workspace/ComfyUI/main.py)이 부른다.
+COPY --chmod=755 scripts/seed_manager_config.py /
 
 # Bake workflow templates into the image so they appear in the user's ComfyUI
 # workflow browser on first launch. 스테이징 경로(/ComfyUI)에 두고 pre_start.sh 가
@@ -499,7 +498,8 @@ RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
 # 런타임 전용 ENV. 파일 맨 아래에 둔다 — ENV 도 그 아래 RUN 들의 캐시 키에
 # 들어가므로 위에 두면 ARG 를 내려 얻은 캐시 이득이 그대로 사라진다. 여기 아래로는 RUN 이 없다.
 # 소비자: ensure_pytorch_stack.sh (TORCH_VERSION/TORCHVISION_VERSION/CUDA_VERSION),
-# download_presets.sh (PRESET_DOWNLOAD). PYTORCH_STACK_ID 는 진단용 기록이다.
+# download_presets.sh (PRESET_DOWNLOAD), ComfyUI (COMFYUI_DISABLE_PRODUCT_TIPS), 내장 Manager
+# (COMFYUI_MANAGER_SKIP_MANAGER_REQUIREMENTS). PYTORCH_STACK_ID 는 진단용 기록이다.
 # Comma-separated list of presets to download into the model mount at runtime.
 ARG DEFAULT_PRESET_DOWNLOAD=""
 ENV TORCH_VERSION=${TORCH_VERSION}
@@ -507,6 +507,18 @@ ENV TORCHVISION_VERSION=${TORCHVISION_VERSION}
 ENV CUDA_VERSION=${CUDA_VERSION}
 ENV PYTORCH_STACK_ID="python-${PYTHON_VERSION}-torch-${TORCH_VERSION}-torchvision-${TORCHVISION_VERSION}-${CUDA_VERSION}"
 ENV PRESET_DOWNLOAD=${DEFAULT_PRESET_DOWNLOAD}
+# ComfyUI 는 v0.44.0 부터 기동할 때마다(그리고 client_id 없는 첫 job 뒤 한 번) Comfy Org 상업 제품 안내 한 줄을 로그에 찍는다
+# (app/product_tips.py). 그 로그는 유저가 콘솔에서 그대로 읽으므로 끈다. 인자(`--disable-product-tips`)가 아니라 ENV 인 이유:
+# compat shim 이나 유저가 직접 띄운 ComfyUI 도 같이 덮인다. 값은 1·true·yes 를 받는다.
+ENV COMFYUI_DISABLE_PRODUCT_TIPS=1
+# 유저가 Manager 로 ComfyUI 를 업데이트하면 내장 Manager 가 ComfyUI 의 manager_requirements.txt 를 다시 깐다
+# (comfyui_manager 4.3 glob/manager_core.py install_manager_requirements). v0.44.1 의 그 파일은 comfyui_manager==4.2.2 라
+# 그대로 두면 Manager 가 보안 수정이 빠진 4.2.2 로 내려간다(그 판은 network_mode=personal_cloud 가 아니면 노드 설치를 전부
+# 막는다 — docker-bake.hcl 의 COMFYUI_MANAGER_VERSION 주석). 이 변수가 1·true·yes 면 그 재설치만 건너뛴다.
+# 버전과 상관없이 건너뛰므로, 앞으로 ComfyUI 업데이트가 요구하는 Manager 상향도 건너뛴다(그때는 이미지 재빌드로 올린다 —
+# docker-bake.hcl 의 COMFYUI_MANAGER_VERSION).
+# 4.3 의 새 UI 경로만 이 변수를 보고, 레거시 UI(--enable-manager-legacy-ui) 경로의 같은 함수는 무시한다.
+ENV COMFYUI_MANAGER_SKIP_MANAGER_REQUIREMENTS=1
 
 # Set entrypoint to the start script
 CMD ["/start.sh"]
@@ -518,6 +530,10 @@ CMD ["/start.sh"]
 #   1) 노드 로드: `main.py --quick-test-for-ci` 로 이미지 안 custom node 를 전부 불러 IMPORT FAILED 가
 #      없는지 본다 (2026-09-29 rc0928a 에서 26개 로드, 25초). 로드가 /venv 를 바꾸면(런타임 자동 설치)
 #      그것도 실패로 본다 — 그러면 모든 pod 가 기동마다 설치를 하게 된다.
+#      `--enable-manager` 를 post_start.sh 와 같게 준다. 그래야 내장 Manager 의 import·prestartup(PIPFixer 등)·start()
+#      까지 여기서 돌고 위 /venv 불변 검사도 그것을 덮는다 (quick-test 는 start() 뒤 노드 로드를 마치고 끝난다).
+#      2026-11-06 레거시 Manager clone 과 comfy-ex-tagcomplete 를 빼서 로드되는 custom node 는 그 전 빌드보다 2개 적다
+#      (내장 Manager 는 custom_nodes 폴더 밖이라 이 목록에 안 나온다).
 #   2) 잠금 대조: 설치 목록(`pip freeze --all`, torch 셋 제외)이 PIP_LOCK_FILE 과 정확히 같은지 본다.
 #      잠금이 비었거나(none.txt) custom node 를 안 까는 slim 타깃이면 건너뛴다.
 #   3) 모듈 폴더를 공유하는 배포판의 승자: onnxruntime ↔ onnxruntime-gpu, opencv 3종은 같은 폴더를 쓰고
@@ -536,7 +552,7 @@ ARG CODE_SERVER_VERSION
 RUN set -e; \
     pip freeze --all > /tmp/freeze-before.txt; \
     cd /opt/ComfyUI; \
-    timeout 900 python main.py --cpu --quick-test-for-ci --base-directory /workspace/ComfyUI \
+    timeout 900 python main.py --cpu --quick-test-for-ci --enable-manager --base-directory /workspace/ComfyUI \
         > /tmp/node-check.log 2>&1 || { tail -n 80 /tmp/node-check.log; exit 1; }; \
     if grep -n "IMPORT FAILED" /tmp/node-check.log; then tail -n 80 /tmp/node-check.log; exit 1; fi; \
     echo "[node-check] custom node entries loaded: $(awk '/Import times for custom nodes/,0' /tmp/node-check.log | grep -c seconds)"; \

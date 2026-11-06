@@ -24,7 +24,7 @@ sombi/comfyui:(A)-torch2.8.0-(B)
 ```
 
 * **(A)**: `slim` or `base`
-  * `slim`: ComfyUI + Manager only
+  * `slim`: ComfyUI + the built-in ComfyUI-Manager only
   * `base`: slim + pre-installed custom nodes
 * **(B)**: CUDA version → `cu124`, `cu126`, `cu128`
 
@@ -112,8 +112,13 @@ bash /download_presets.sh PRESET1,PRESET2,...
 
 * **OS**: Ubuntu 24.04 (22.02 for CUDA 12.4)
 * **Python**: 3.12
-* **Framework**: [ComfyUI](https://github.com/comfyanonymous/ComfyUI) + [ComfyUI Manager](https://github.com/Comfy-Org/ComfyUI-Manager) + [JupyterLab](https://jupyter.org/) + [code-server](https://github.com/coder/code-server)
+* **Framework**: [ComfyUI](https://github.com/comfyanonymous/ComfyUI) + built-in [ComfyUI-Manager](https://github.com/Comfy-Org/ComfyUI-Manager) (pip package `comfyui_manager`, started with `--enable-manager`) + [JupyterLab](https://jupyter.org/) + [code-server](https://github.com/coder/code-server)
 * **Libraries**: PyTorch 2.8.0, CUDA (12.4–12.8), Triton, [hf\_hub](https://huggingface.co/docs/huggingface_hub), [nvtop](https://github.com/Syllo/nvtop)
+
+> ComfyUI-Manager is the one built into ComfyUI, not a custom node. Before ComfyUI starts, `/seed_manager_config.py` sets `network_mode = personal_cloud` in the Manager's `config.ini`: `/post_start.sh` runs it on `/workspace/ComfyUI/user/__manager/config.ini`, and the `/workspace/ComfyUI/main.py` shim runs it on the user folder it starts ComfyUI with (`--user-directory`, else `user` under `--base-directory`). It creates the file if missing, keeps `private`, `offline` and `personal_cloud`, and switches any other value (unset, empty, `public`, ...). This lets nightly installs, installs of nodes listed in ComfyUI-Manager's node database (including ones not in the Comfy Registry), and Update All work even though ComfyUI listens on all interfaces. If you pass `--user-directory` in `COMFYUI_EXTRA_ARGS`, set it in that folder's `__manager/config.ini` yourself.\
+> A kept `private` or `offline` gets the same install restrictions as `public` here, because ComfyUI listens on a non-loopback address. The legacy Manager v3.42 did not use `network_mode` in its security checks, so a volume that set `private` or `offline` under v3.42 can no longer run those installs or Update All until you change the value to `personal_cloud`.\
+> Installing from an arbitrary Git URL needs more: `allow_git_url_install = True` in the same file, and a screen for it that only the Manager's legacy interface (`--enable-manager-legacy-ui`) has. Otherwise clone the repository into `/workspace/ComfyUI/custom_nodes` from a terminal.\
+> A legacy `ComfyUI-Manager` custom node left on your volume is not loaded when ComfyUI runs with `--enable-manager`.
 
 #### Custom Nodes (only in **base** image)
 
@@ -136,8 +141,8 @@ bash /download_presets.sh PRESET1,PRESET2,...
 * ComfyUI-Crystools
 * rgthree-comfy
 * ComfyUI-Image-Saver
-* comfy-ex-tagcomplete
 * ComfyUI-VideoHelperSuite
 * ComfyUI-wanBlockswap
+* ComfyUI-MeshiveInjection
 
 > 👉 More details in the [Wiki](https://github.com/somb1/ComfyUI-Docker/wiki/Custom-Nodes).

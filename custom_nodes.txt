@@ -44,7 +44,7 @@ https://github.com/chrisgoringe/cg-use-everywhere.git          50ae9f8c5d8b95385
 https://github.com/crystian/ComfyUI-Crystools.git              2f18256c5b5063937106f29a8e0a7db3ae3869b7
 https://github.com/rgthree/rgthree-comfy.git                   2c5342a8cb0eaecaabf61435a5f37dd594c510ba
 https://github.com/alexopus/ComfyUI-Image-Saver.git            b4b349e553d0f43713fa6914708b70b296392f73
-https://github.com/jupo-ai/comfy-ex-tagcomplete.git            028631834bb99b9dc1fb98fa53307686c7e83b80
+# comfy-ex-tagcomplete(jupo-ai, 0286318)는 2026-11-06 뺐다 — upstream 저장소가 없어져 clone 이 빌드를 막는다. 시드 workflow 는 안 쓴다.
 https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git    4d907bee61e92c2e65af3bd6383a4e4d356126d1
 https://github.com/orssorbit/ComfyUI-wanBlockswap.git          5fa2ec0fa55879fe43a33e762fff91fc2c553a67
-https://github.com/meshive/ComfyUI-MeshiveInjection.git        2478aef13c1592359a3bcfc6f631d5a3fb0eec74   # 우리 노드 v1.4.3, 2026-11-04 (v1.4.2 에서 올림)
+https://github.com/meshive/ComfyUI-MeshiveInjection.git        ccc77ae5fbf755e80731b7bb0d7ebbbdd06c7122   # 우리 노드 v1.4.4, 2026-11-06 (v1.4.3 에서 올림)

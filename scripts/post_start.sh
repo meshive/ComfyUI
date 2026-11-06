@@ -46,6 +46,14 @@ link_builtin_custom_nodes() {
 }
 link_builtin_custom_nodes
 
+# 내장 Manager(comfyui_manager 4.x)의 config.ini 에 network_mode = personal_cloud 를 시드한다 — 규칙·사유는
+# /seed_manager_config.py(scripts/seed_manager_config.py) 주석. 옛 경로 shim(/workspace/ComfyUI/main.py)도 같은 스크립트를 부른다.
+#   - 유저 폴더는 `--base-directory` 기준 $COMFYUI_DATA/user 다. COMFYUI_EXTRA_ARGS 로 `--user-directory` 를 다른 곳으로 주면
+#     Manager 는 그쪽 config.ini 를 읽으므로 이 시드가 닿지 않는다(그 경우 Manager 기본값 public 으로 뜬다).
+#   - Manager 는 기동할 때 한 번 읽으므로(재시작해야 반영) ComfyUI 를 띄우기 전에 한다. 실패해도 ComfyUI 는 띄운다.
+python -I /seed_manager_config.py "$COMFYUI_DATA/user" \
+    || echo "**** WARN: could not seed the ComfyUI-Manager config ****" >&2
+
 /ensure_pytorch_stack.sh
 
 # 데이터 쪽 extra_model_paths.yaml — start.sh 의 configure_model_paths 가 쓴 것(프리셋 이미지·/workspace/models
@@ -67,10 +75,15 @@ echo "**** Starts ComfyUI, listening on port 3000, with additional arguments spe
     # (= 데이터 폴더, NFS 일 수 있음)인데, 같은 볼륨을 쓰는 Pod 가 둘이면 DB 잠금이 부딪치고 SQLite 의
     # "database is locked" 는 ComfyUI 를 종료시킨다. DB 는 기본 꺼진 에셋 색인용이라 Pod 마다 따로여도 된다.
     # 유저가 COMFYUI_EXTRA_ARGS 로 다시 주면 뒤에 오는 그 값이 이긴다.
+    # --enable-manager 는 이미지에 깐 내장 Manager(comfyui_manager)를 켠다. 없으면 Manager 가 아예 없다 — 프론트는
+    # system_stats argv 에 이 원소가 정확히 있어야 Manager 메뉴를 보여 준다. COMFYUI_EXTRA_ARGS 의 --disable-manager-ui·
+    # --enable-manager-legacy-ui 와 같이 줘도 된다(둘끼리만 배타적이다). 이 인자로 뜨면 이름에 'comfyui-manager' 가 든
+    # custom node(볼륨에 남은 레거시 사본 등)는 로드되지 않는다.
     python main.py --listen --port 3000 \
         --base-directory "$COMFYUI_DATA" \
         --temp-directory "$COMFYUI_APP" \
         --database-url "sqlite:///$COMFYUI_APP/user/comfyui.db" \
+        --enable-manager \
         "${EXTRA_PATHS_ARGS[@]}" \
         $COMFYUI_EXTRA_ARGS 2>&1
     status=$?
