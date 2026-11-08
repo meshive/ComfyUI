@@ -500,8 +500,13 @@ RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
 # custom_nodes.txt 에 칸을 더하지 않고 이 작은 레이어로 따로 둔 이유도 그 헤더에 있다.
 # 형식은 Manager 가 쓰는 것과 같다(cnr_utils.generate_cnr_id: 개행 없이 id 만). 줄이 가리키는 폴더가 git checkout 이
 # 아니면(custom_nodes.txt 에서 빠졌거나 URL 이 바뀜) 빌드를 멈춘다 — 조용히 빠지면 그 팩만 '미설치'로 보인다.
+# `custom_nodes/.disabled` 도 여기서 만든다. Manager 는 끈 팩을 그 폴더로 옮기는데, registry 판(CNR) 팩을 끌 때만 폴더를
+# 만들고 git(nightly) 팩을 끄는 경로(unified_disable)는 폴더가 있다고 보고 바로 shutil.move 한다. 그래서 새 Pod 에서 처음
+# 끄는 팩이 이미지 기본 팩이면 FileNotFoundError 로 실패한다(2026-11-08 rc1108a 로컬 E2E). 빈 폴더는 ComfyUI 가 노드
+# 로드에서 건너뛴다(`.disabled` 로 끝나는 이름). custom node 를 안 까는 slim 에서도 Manager 설치는 되므로 조건 밖에서 만든다.
 COPY custom_nodes_cnr.txt /custom_nodes_cnr.txt
-RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
+RUN mkdir -p /workspace/ComfyUI/custom_nodes/.disabled && \
+    if [ -z "$SKIP_CUSTOM_NODES" ]; then \
         set -e; \
         cd /opt/ComfyUI/custom_nodes; \
         n=0; \
@@ -611,6 +616,10 @@ RUN set -e; \
     if [ -z "$SKIP_CUSTOM_NODES" ]; then \
         COMFYUI_PATH=/opt/ComfyUI python /tmp/check_cnr_ids.py /custom_nodes_cnr.txt; \
     fi; \
+    if [ ! -d /workspace/ComfyUI/custom_nodes/.disabled ]; then \
+        echo "[node-check] custom_nodes/.disabled is missing — Manager cannot disable a git (nightly) pack" >&2; exit 1; \
+    fi; \
+    echo "[node-check] custom_nodes/.disabled present"; \
     touch /node-check.ok
 
 # 최종 이미지 = 위 `image` 단계 + 검사 통과 표지. 검사 단계를 빌드에 끌어들이는 게 이 COPY 의 역할이다
