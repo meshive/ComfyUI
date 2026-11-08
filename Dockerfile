@@ -495,6 +495,28 @@ RUN set -e; \
 COPY logo/meshive.txt /etc/meshive.txt
 RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
 
+# registry id: git 으로 받은 팩마다 Comfy Registry id 를 `.git/.cnr-id` 에 적는다 — 내장 Manager 가 그 팩을
+# registry 팩으로 알아봐야 프론트 Nodes Manager 가 '설치됨'으로 보인다(사유·형식은 custom_nodes_cnr.txt 헤더).
+# custom_nodes.txt 에 칸을 더하지 않고 이 작은 레이어로 따로 둔 이유도 그 헤더에 있다.
+# 형식은 Manager 가 쓰는 것과 같다(cnr_utils.generate_cnr_id: 개행 없이 id 만). 줄이 가리키는 폴더가 git checkout 이
+# 아니면(custom_nodes.txt 에서 빠졌거나 URL 이 바뀜) 빌드를 멈춘다 — 조용히 빠지면 그 팩만 '미설치'로 보인다.
+COPY custom_nodes_cnr.txt /custom_nodes_cnr.txt
+RUN if [ -z "$SKIP_CUSTOM_NODES" ]; then \
+        set -e; \
+        cd /opt/ComfyUI/custom_nodes; \
+        n=0; \
+        while read -r url cnr _rest || [ -n "$url" ]; do \
+            case "$url" in ''|'#'*) continue ;; esac; \
+            dir=$(basename "$url" .git); \
+            case "$cnr" in cnr=?*) ;; *) echo "[build] ERROR: $dir needs cnr=<registry id>, got '$cnr'" >&2; exit 1 ;; esac; \
+            if [ ! -d "$dir/.git" ]; then echo "[build] ERROR: $dir is not a git checkout in custom_nodes" >&2; exit 1; fi; \
+            printf '%s' "${cnr#cnr=}" > "$dir/.git/.cnr-id"; \
+            echo "[build] $dir cnr-id ${cnr#cnr=}"; \
+            n=$((n + 1)); \
+        done < /custom_nodes_cnr.txt; \
+        echo "[build] registry ids written: $n"; \
+    fi
+
 # 런타임 전용 ENV. 파일 맨 아래에 둔다 — ENV 도 그 아래 RUN 들의 캐시 키에
 # 들어가므로 위에 두면 ARG 를 내려 얻은 캐시 이득이 그대로 사라진다. 여기 아래로는 RUN 이 없다.
 # 소비자: ensure_pytorch_stack.sh (TORCH_VERSION/TORCHVISION_VERSION/CUDA_VERSION),
@@ -524,7 +546,7 @@ ENV COMFYUI_MANAGER_SKIP_MANAGER_REQUIREMENTS=1
 CMD ["/start.sh"]
 
 # ── 빌드 마지막 검사 (별도 단계) ─────────────────────────────────────────────────────────────
-# 위 이미지를 그대로 받아 네 가지를 확인하고, 하나라도 실패하면 빌드 전체를 실패시킨다. 별도 단계에서 하는
+# 위 이미지를 그대로 받아 다섯 가지를 확인하고, 하나라도 실패하면 빌드 전체를 실패시킨다. 별도 단계에서 하는
 # 이유: ComfyUI 를 한 번 띄우면 로그·DB·캐시 같은 부산물이 생기는데, 그걸 이미지 레이어에 남기지 않으려는
 # 것이다. 최종 이미지는 이 단계가 만든 표지 파일 하나만 받는다 (아래 마지막 `FROM image`).
 #   1) 노드 로드: `main.py --quick-test-for-ci` 로 이미지 안 custom node 를 전부 불러 IMPORT FAILED 가
@@ -544,11 +566,15 @@ CMD ["/start.sh"]
 #      스크립트를 받으므로, 그 스크립트가 --version 을 다르게 다루거나 설치 방식을 바꾸면(deb 대신 standalone 등)
 #      다른 판이 깔리거나 PATH 에서 빠진다. 번들 node 가 이 베이스에서 실행되는지도 함께 확인된다. image 단계가
 #      아니라 여기서 하는 이유는 위와 같다 — `code-server --version` 도 config.yaml 을 부산물로 남긴다.
+#   5) registry id: custom_nodes_cnr.txt 의 id 를 내장 Manager 가 자기 함수(identify_node_pack_from_path —
+#      `/v2/customnode/installed` 가 쓰는 함수)로 그대로 읽는지 본다(scripts/check_cnr_ids.py). 빈 cnr_id 면 프론트가
+#      그 팩을 '미설치'로 보인다. 스크립트는 이 단계에만 COPY 해 최종 이미지에 남기지 않는다.
 # 알려진 한계: 실행할 때만 import 하는 의존성(예: Frame-Interpolation 의 cupy)은 1) 로 못 잡는다.
 FROM image AS node-check
 ARG SKIP_CUSTOM_NODES
 ARG PIP_LOCK_FILE=constraints/none.txt
 ARG CODE_SERVER_VERSION
+COPY scripts/check_cnr_ids.py /tmp/check_cnr_ids.py
 RUN set -e; \
     pip freeze --all > /tmp/freeze-before.txt; \
     cd /opt/ComfyUI; \
@@ -582,6 +608,9 @@ RUN set -e; \
         echo "[node-check] installed code-server '${cs}' differs from CODE_SERVER_VERSION ${CODE_SERVER_VERSION}" >&2; exit 1; \
     fi; \
     echo "[node-check] code-server ${cs} matches CODE_SERVER_VERSION"; \
+    if [ -z "$SKIP_CUSTOM_NODES" ]; then \
+        COMFYUI_PATH=/opt/ComfyUI python /tmp/check_cnr_ids.py /custom_nodes_cnr.txt; \
+    fi; \
     touch /node-check.ok
 
 # 최종 이미지 = 위 `image` 단계 + 검사 통과 표지. 검사 단계를 빌드에 끌어들이는 게 이 COPY 의 역할이다

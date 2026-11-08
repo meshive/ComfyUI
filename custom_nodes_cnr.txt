@@ -1,0 +1,43 @@
+# custom_nodes.txt 의 git 팩 → Comfy Registry node id. 한 줄 = "<git-url> cnr=<registry id>".
+#
+# 빌드가 `/opt/ComfyUI/custom_nodes/<dir>/.git/.cnr-id` 에 id 를 적는다(Dockerfile 의 "registry id" RUN).
+#
+# 왜 필요한가 (2026-11-07 dev 실측):
+#   내장 Manager(4.3)는 git 으로 받은 팩의 registry id 를 `.git/.cnr-id` 에서만 읽는다(cnr_utils.read_cnr_id).
+#   파일이 없으면 `/v2/customnode/installed` 의 cnr_id 가 빈 값이고, 프론트(1.57.6 Nodes Manager)는 팩 id 를
+#   `cnr_id || aux_id` 로 잡아 `kijai/ComfyUI-KJNodes` 같은 GitHub 경로로 기억한다. registry 목록의 id
+#   (`comfyui-kjnodes`)와 맞지 않아 이미지에 든 팩이 전부 '미설치'로 보이고 Install 버튼이 뜬다.
+#   Manager 는 registry 목록을 받은 뒤 이 파일을 스스로 쓰지만(resolve_from_path), network_mode 가 public 이
+#   아니면(우리는 personal_cloud) 시작 때 목록을 기다리지 않아(dont_wait) 첫 화면에는 늦고, 프론트는 그 목록을
+#   다시 읽지 않는다 — 그래서 빌드 때 미리 적는다.
+#
+# 왜 custom_nodes.txt 에 칸을 더하지 않았나:
+#   그 파일은 clone 레이어 앞에서 COPY 된다. 바꾸면 custom node clone·requirements·install.py 레이어(~6GB)가
+#   전부 다시 빌드되고, 기존 Pod 도 그만큼 다시 받는다. 이 파일은 이미지 끝의 작은 레이어에서만 쓴다.
+#
+# 올릴 때:
+#   - custom_nodes.txt 에 팩을 넣거나 URL 을 바꾸면 이 파일도 같이 본다. 여기 있는데 이미지에 없는 팩이면 빌드가 멈춘다.
+#   - id 는 api.comfy.org/nodes/search 결과에서 repository 가 그 URL 과 같은 node 의 id 다(대소문자 그대로).
+#   - registry 에 없는 팩은 넣지 않는다: ComfyUI-MultiGPU(pollockjj), ComfyUI-MeshiveInjection(우리 노드).
+#   - node-check 단계(scripts/check_cnr_ids.py)가 Manager 자기 함수로 이 id 를 그대로 읽는지 확인한다.
+
+https://github.com/kijai/ComfyUI-KJNodes.git                   cnr=comfyui-kjnodes
+https://github.com/kijai/ComfyUI-WanVideoWrapper.git           cnr=ComfyUI-WanVideoWrapper
+https://github.com/city96/ComfyUI-GGUF.git                     cnr=ComfyUI-GGUF
+https://github.com/yolain/ComfyUI-Easy-Use.git                 cnr=comfyui-easy-use
+https://github.com/Fannovel16/ComfyUI-Frame-Interpolation.git  cnr=comfyui-frame-interpolation
+https://github.com/Smirnov75/ComfyUI-mxToolkit.git             cnr=comfyui-mxtoolkit
+https://github.com/ssitu/ComfyUI_UltimateSDUpscale.git         cnr=comfyui_ultimatesdupscale
+https://github.com/receyuki/comfyui-prompt-reader-node.git     cnr=comfyui-prompt-reader-node
+https://github.com/cubiq/ComfyUI_essentials.git                cnr=comfyui_essentials
+https://github.com/ltdrdata/ComfyUI-Impact-Pack.git            cnr=comfyui-impact-pack
+https://github.com/ltdrdata/ComfyUI-Impact-Subpack.git         cnr=comfyui-impact-subpack
+https://github.com/jags111/efficiency-nodes-comfyui.git        cnr=efficiency-nodes-comfyui
+https://github.com/pythongosssss/ComfyUI-Custom-Scripts.git    cnr=comfyui-custom-scripts
+https://github.com/JPS-GER/ComfyUI_JPS-Nodes.git               cnr=ComfyUI_JPS-Nodes
+https://github.com/chrisgoringe/cg-use-everywhere.git          cnr=cg-use-everywhere
+https://github.com/crystian/ComfyUI-Crystools.git              cnr=ComfyUI-Crystools
+https://github.com/rgthree/rgthree-comfy.git                   cnr=rgthree-comfy
+https://github.com/alexopus/ComfyUI-Image-Saver.git            cnr=comfyui-image-saver
+https://github.com/Kosinkadink/ComfyUI-VideoHelperSuite.git    cnr=comfyui-videohelpersuite
+https://github.com/orssorbit/ComfyUI-wanBlockswap.git          cnr=wanblockswap
