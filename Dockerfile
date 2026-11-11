@@ -504,6 +504,7 @@ RUN echo 'cat /etc/meshive.txt' >> /root/.bashrc
 # 만들고 git(nightly) 팩을 끄는 경로(unified_disable)는 폴더가 있다고 보고 바로 shutil.move 한다. 그래서 새 Pod 에서 처음
 # 끄는 팩이 이미지 기본 팩이면 FileNotFoundError 로 실패한다(2026-11-08 rc1108a 로컬 E2E). 빈 폴더는 ComfyUI 가 노드
 # 로드에서 건너뛴다(`.disabled` 로 끝나는 이름). custom node 를 안 까는 slim 에서도 Manager 설치는 되므로 조건 밖에서 만든다.
+# 볼륨이 /workspace(/ComfyUI) 를 덮으면 이 폴더가 안 보이므로 post_start.sh 가 기동 때 데이터 쪽에도 만든다.
 COPY custom_nodes_cnr.txt /custom_nodes_cnr.txt
 RUN mkdir -p /workspace/ComfyUI/custom_nodes/.disabled && \
     if [ -z "$SKIP_CUSTOM_NODES" ]; then \

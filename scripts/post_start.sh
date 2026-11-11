@@ -13,7 +13,9 @@ cd "$COMFYUI_APP"
 # 유저 볼륨이 /workspace 나 /workspace/ComfyUI 에 붙으면 데이터 폴더가 비어 있는 채로 시작하므로 여기서
 # 만든다. custom_nodes 는 특히 빠지면 안 된다: ComfyUI 는 기동 때 custom_nodes 경로마다 os.listdir 을
 # 부르고, 폴더가 없으면 예외로 죽는다 (main.py execute_prestartup_script).
-mkdir -p /workspace/logs "$COMFYUI_DATA"/{models,custom_nodes,input,output,user}
+# custom_nodes/.disabled 도 만든다 — 이미지의 빈 폴더(Dockerfile 끝 registry id 레이어 주석)는 볼륨이 덮으면 안 보이고,
+# 그러면 내장 Manager 의 git(nightly) 팩 끄기가 FileNotFoundError 로 실패한다(2026-11-08 /workspace 볼륨 로컬 재현).
+mkdir -p /workspace/logs "$COMFYUI_DATA"/{models,custom_nodes,custom_nodes/.disabled,input,output,user}
 COMFYUI_LOG=/workspace/logs/comfyui_3000.log
 ln -sf "$COMFYUI_LOG" "$COMFYUI_DATA/user/comfyui_3000.log"
 
@@ -23,14 +25,23 @@ ln -sf "$COMFYUI_LOG" "$COMFYUI_DATA/user/comfyui_3000.log"
 # 덮은 경우를 채운다.
 #   - 같은 이름이 이미 있으면(깨진 링크 포함) 건드리지 않는다 — 유저가 자기 버전을 둔 것이다.
 #   - Manager 로 끈 노드(.disabled/<이름>, <이름>.disabled)는 다시 걸지 않는다.
+#   - 이름이 달라도 그 내장 노드를 가리키는 링크가 이미 있으면(끈 것 포함) 다시 걸지 않는다. 내장 Manager 4.x 는
+#     끄고 켤 때 링크 이름을 registry id 로 바꾼다(끔 = .disabled/<cnr_id>@nightly, 켬 = <cnr_id>). 이름만 보면
+#     볼륨이 custom_nodes 를 덮은 Pod 가 다시 뜰 때 같은 노드를 하나 더 걸어 두 번 로드되고(JS 확장도 두 벌),
+#     끈 노드는 다시 켜진다(2026-11-08 dev 재현).
 #   - 이미지에서 사라진 내장 노드를 가리키던 링크는 지운다 — /opt 를 가리키는 링크, 즉 여기서 건 것만.
 link_builtin_custom_nodes() {
     local dir="$COMFYUI_DATA/custom_nodes" src name link
+    local -A linked=()
+    for link in "$dir"/* "$dir"/.disabled/*; do
+        if [ -L "$link" ]; then linked["$(readlink "$link")"]=1; fi
+    done
     for src in "$COMFYUI_APP"/custom_nodes/*; do
         name=$(basename "$src")
         [ "$name" = "__pycache__" ] && continue
         if [ -e "$dir/$name" ] || [ -L "$dir/$name" ] \
-                || [ -e "$dir/.disabled/$name" ] || [ -e "$dir/$name.disabled" ]; then
+                || [ -e "$dir/.disabled/$name" ] || [ -e "$dir/$name.disabled" ] \
+                || [ -n "${linked[$src]:-}" ]; then
             continue
         fi
         ln -s "$src" "$dir/$name" \
