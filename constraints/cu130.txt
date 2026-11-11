@@ -67,6 +67,16 @@
 #     Registry 의 3.x 판 dependencies 도 비어 있다). 확정은 3) 의 잠금 빌드 대조가 한다 — `<` 나 `>` 줄이 나오면 원인부터 본다.
 #   → 검증 이미지 기록은 빌드 뒤 여기에 추가한다.
 #
+# 2026-11-11 ComfyUI v0.44.1 → v0.45.1 (MiniMax-H3-Image 지원): 같은 방식으로 6줄만 손으로 고쳤다 (271줄 그대로).
+#   - v0.45.1 requirements 의 `==` 3개: frontend 1.58.5·workflow-templates 0.11.106·comfy-kitchen 0.2.41.
+#   - workflow-templates 0.11.106 이 `==` 로 요구하는 하위 패키지 중 바뀐 3개: core 0.3.397·json 0.1.132·media-assets-02
+#     0.1.31. 나머지 5개(media-api 0.3.84·media-assets-01 0.1.48·media-image 0.3.160·media-other 0.3.229·media-video 0.3.101)
+#     는 같은 버전이다.
+#   - 새 판들의 Requires-Dist 는 비었거나(frontend·하위 3개) 예전과 같다(kitchen 은 extra 만, workflow-templates 는 같은 하위
+#     패키지 8개를 `==` 로) — PyPI JSON 기준. kitchen 0.2.41 은 cp312-abi3 manylinux x86_64·aarch64 휠이 있다.
+#   - v0.45.1 의 requirements 는 v0.45.0 과 workflow-templates 줄(0.11.105 → 0.11.106)만 다르다.
+#   → 검증 이미지 기록은 빌드 뒤 여기에 추가한다.
+#
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
 #     넘긴다. 직접 URL 을 constraint 로 주면, 요구하는 쪽 URL 모양이 다를 때 pip 가 ResolutionImpossible
@@ -129,19 +139,19 @@ color-matcher==0.6.0
 colour-science==0.4.7
 comfy-aimdo==0.6.0
 comfy-angle==0.1.1
-comfy-kitchen==0.2.40
+comfy-kitchen==0.2.41
 comfyui-embedded-docs==0.5.16
 comfyui-manager==4.3
-comfyui-workflow-templates-core==0.3.394
-comfyui-workflow-templates-json==0.1.129
+comfyui-workflow-templates-core==0.3.397
+comfyui-workflow-templates-json==0.1.132
 comfyui-workflow-templates-media-api==0.3.84
 comfyui-workflow-templates-media-assets-01==0.1.48
-comfyui-workflow-templates-media-assets-02==0.1.29
+comfyui-workflow-templates-media-assets-02==0.1.31
 comfyui-workflow-templates-media-image==0.3.160
 comfyui-workflow-templates-media-other==0.3.229
 comfyui-workflow-templates-media-video==0.3.101
-comfyui_frontend_package==1.57.6
-comfyui_workflow_templates==0.11.103
+comfyui_frontend_package==1.58.5
+comfyui_workflow_templates==0.11.106
 comm==0.2.3
 contourpy==1.4.0
 cryptography==50.0.1

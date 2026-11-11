@@ -214,7 +214,7 @@ ARG COMFYUI_VERSION=v0.37.4
 # `--enable-manager` 다 (post_start.sh·compat shim·아래 node-check) — 프론트는 system_stats 의 argv 에 그 원소가
 # 정확히 있어야 Manager 메뉴를 보여 준다.
 #   - 버전은 docker-bake.hcl 의 COMFYUI_MANAGER_VERSION 으로 고정한다 (4.2.2 가 아니라 4.3 인 이유도 그쪽 주석).
-#   - ComfyUI 의 manager_requirements.txt 는 쓰지 않는다. v0.44.1(v0.44.0 도 같다)은 그 파일에서 comfyui_manager==4.2.2 를
+#   - ComfyUI 의 manager_requirements.txt 는 쓰지 않는다. v0.45.1(v0.44.0 부터 같다)은 그 파일에서 comfyui_manager==4.2.2 를
 #     고정하므로, 그 파일을 깔면 잠금(comfyui-manager==4.3)·이 값과 충돌해 pip 해석이 실패한다.
 #   - 잠금을 켠 RUN 이라 이 값과 constraints/cu130.txt 의 comfyui-manager 줄이 다르면 pip 해석이 실패한다 — 올릴 때 둘을
 #     같이 바꾼다.
@@ -540,7 +540,7 @@ ENV PRESET_DOWNLOAD=${DEFAULT_PRESET_DOWNLOAD}
 # compat shim 이나 유저가 직접 띄운 ComfyUI 도 같이 덮인다. 값은 1·true·yes 를 받는다.
 ENV COMFYUI_DISABLE_PRODUCT_TIPS=1
 # 유저가 Manager 로 ComfyUI 를 업데이트하면 내장 Manager 가 ComfyUI 의 manager_requirements.txt 를 다시 깐다
-# (comfyui_manager 4.3 glob/manager_core.py install_manager_requirements). v0.44.1 의 그 파일은 comfyui_manager==4.2.2 라
+# (comfyui_manager 4.3 glob/manager_core.py install_manager_requirements). v0.45.1 의 그 파일은 comfyui_manager==4.2.2 라
 # 그대로 두면 Manager 가 보안 수정이 빠진 4.2.2 로 내려간다(그 판은 network_mode=personal_cloud 가 아니면 노드 설치를 전부
 # 막는다 — docker-bake.hcl 의 COMFYUI_MANAGER_VERSION 주석). 이 변수가 1·true·yes 면 그 재설치만 건너뛴다.
 # 버전과 상관없이 건너뛰므로, 앞으로 ComfyUI 업데이트가 요구하는 Manager 상향도 건너뛴다(그때는 이미지 재빌드로 올린다 —

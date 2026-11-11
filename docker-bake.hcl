@@ -118,9 +118,29 @@ variable "TORCHVISION_VERSION_CU130" {
 # /prompt 를 한 번 받으면 유저 폴더에 used_headlessly 표지가 생기고 run bar 에 'Deploy to Comfy API' 버튼이 뜬다
 # (서버 플래그 deploy_to_cloud — `--feature-flag` 로 못 끈다). 이 버튼은 손대지 않았다. 기동 로그의 Comfy Org 제품 안내
 # 줄(product tips)은 Dockerfile 런타임 ENV 의 COMFYUI_DISABLE_PRODUCT_TIPS=1 로 끈다.
-# master 는 v0.44.0 뒤 frontend 1.58.5 를 고정했다(다음 릴리스). v0.44.1 은 v0.44.0 과 같은 1.57.6 이고 그대로 쓴다.
+#
+# v0.44.1 → v0.45.1 (2026-11-11): MiniMax-H3-Image 네이티브 지원(v0.45.0, ComfyUI#17655 — `MiniMaxH3ImageConditioning`,
+# comfy/ldm/minimax 의 model·vae·sampling)이 이유다. **v0.45.0 미만으로 내리면 WSB `minimax-h3-image` 자산 세트의 동봉
+# workflow 가 열리지 않는다**(2026-11-11 기준 is_active false). v0.45.1(2026-11-10, 02457b8c)은 v0.45.0(989d93d0, GitHub
+# Release)의 후손 패치 태그이고, 차이는 API 파트너 노드(LTX AlphaGen·Reframe·SDR to HDR·Upscale, MiniMax H3 Image API)와
+# workflow-templates 0.11.105→0.11.106 뿐이다. 0.11.106 의 H3-Image 템플릿 2개는 세트 동봉 판과 바이트가 같다.
+# master 의 #17675(CreateVideo chroma_subsampling 에 "none" 복구)는 v0.45.1 에 없다 — 시드 workflow 는 그 위젯을 쓰지 않는다.
+# requirements 차이(v0.44.1 → v0.45.1): frontend 1.57.6→1.58.5, workflow-templates 0.11.103→0.11.106, comfy-kitchen
+# 0.2.40→0.2.41. 새 의존성 없음, torch 줄 그대로. manager_requirements.txt 는 같고(comfyui_manager==4.2.2), agent_requirements.txt
+# 는 comfy-agent 의 버전 표기만 빠졌다(깔지 않는다). CLI 인자는 같고 삭제된 node_id 도 없다(추가 22개).
+# ⚠️ 결과가 달라질 수 있어 생성 회귀가 필요한 세트:
+#    - Qwen 3.x 경로 변경(#17361 병렬 Linear 가중치 합치기·#17625·#17620 fp8 텍스트 생성 크래시 수정·#17582 영상 입력) —
+#      Qwen3.5 로 TextGenerate 를 돌리는 flux3-klein·moss-image·qwen-image-2.1·minimax-h3-image.
+#    - #17655 가 comfy/ldm/minimax/model.py·vae.py 를 고쳤다 — minimax-h3(영상).
+#    - #17635(greedy 디코딩에도 반복·존재 패널티 적용)은 시드 workflow 의 TextGenerate 11개가 전부 sampling on 이라 해당 없다.
+# 프론트 1.58.5 에서 우리 확장이 기대는 지점(missingModel 스토어·missing-model-download/-all/-gated-access data-testid·
+# Comfy.Workflow.Draft.v2 키·createNewTemporary·loadGraphData 시그니처·workspaceStore 의 toast·setting·actionBarButtons·
+# Comfy.TutorialCompleted)이 그대로인 것을 프론트 소스 태그 대조로 확인했다. 바뀐 점: 누락 모델 행·카드는 클래스만 바뀌었고,
+# 테마 변수 --warning-/--success-/--destructive-background 가 없어지고 나머지 옛 변수는 _deprecated-aliases.css 로 옮겨졌다 —
+# ComfyUI-MeshiveInjection v1.4.4 가 이미 대체값을 둔다. 시작 경로에 URL 의 폴더 workflow 열기(useFolderWorkflowsUrlLoader)가
+# 생겼지만 그 파라미터가 있을 때만 탄다.
 variable "COMFYUI_VERSION" {
-    default = "v0.44.1"
+    default = "v0.45.1"
 }
 
 # 내장 ComfyUI-Manager(pip 패키지 comfyui_manager) 버전. Dockerfile 이 ComfyUI 와 같은 RUN 에서
@@ -131,7 +151,7 @@ variable "COMFYUI_VERSION" {
 # 'comfyui-manager' 가 든 레거시 사본은 폴더 이름만으로 로드가 막힌다(comfyui_manager.should_be_disabled, 로그는
 # INFO 'Blocked by policy' 한 줄) — 유저 볼륨에 남은 옛 사본도 마찬가지다.
 #
-# **4.2.2(ComfyUI v0.44.1 의 manager_requirements.txt 고정값, v0.44.0 과 같다)가 아니라 4.3 인 이유:**
+# **4.2.2(ComfyUI v0.45.1 의 manager_requirements.txt 고정값, v0.44.0 부터 같다)가 아니라 4.3 인 이유:**
 #   - Pod 의 ComfyUI 는 `--listen`(0.0.0.0,::) 이라 Manager 가 비-loopback 으로 본다. 4.2.2 새 UI 의 노드 설치는 맨 앞
 #     'middle+' 검사에서 network_mode=personal_cloud 가 아니면 **전부** 막힌다(glob/manager_server.py do_install).
 #     4.3 은 stable CNR 설치만 'middle' 로 내려 허용한다. nightly 설치·Registry 에 없는(git) 노드 설치, update all,
