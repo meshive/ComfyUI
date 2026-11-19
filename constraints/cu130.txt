@@ -84,6 +84,15 @@
 #     시간 차는 -10~+7% 였고, PE 끄고 seed 를 고정한 결과는 이미지 통계가 같다. PE 를 켠 edit 에서 확장 프롬프트가 입력 이미지 내용을
 #     읽었다(ComfyUI#17679 증상 없음). 같은 TE 로 텍스트 생성 뒤 재실행해도 크래시가 없었다(#17609·#17610 수정 확인).
 #     minimax-h3(영상)·flux3-klein·minimax-h3-image 는 아직 돌리지 않았다. 5090 이 필요한데 dev 5090 이 오프라인이다.
+#     → 2026-11-19 real RTX 5090(8 vCPU·40GiB RAM, 커스텀 템플릿 comfyui-rc1111a-h3img-test)에서 rc1111a 로 2개 세트를 돌렸다.
+#       파일은 WSB 스펙의 revision 고정 URL 로 받았고 9개 모두 sha256 이 맞았다. 이미지 안 ComfyUI 는 v0.45.1 이다.
+#       minimax-h3-image: t2i 기본값(PE 켬·seed 42·6 steps, 2048²) 38s(콜드)로 성공했다.
+#         edit 는 기본 지시문 47s, 입력에 맞춘 지시문으로 PE 를 다시 돌린 재실행 52s 로 둘 다 성공했다. 지시한 대상만 바뀌고
+#         배경·글자는 유지됐다. Pod 의 0.11.106 템플릿 2개는 세트 동봉 판과 sha256 이 같다(73f7d9c1·5b4330e9).
+#       minimax-h3(영상): t2v 기본값 73s(콜드)로 성공했다(864×480·5.2s mp4, 화면 정상). Pod 템플릿은 세트 동봉 판과
+#         MarkdownNote 글만 다르고 실행 그래프는 같다.
+#       flux3-klein 은 돌리지 않았다. BFL gated 레포라 HF 토큰 없이는 파일을 받을 수 없다(유저 결정으로 생략).
+#     → 같은 날 정식 태그 base-torch2.11.0-cu130 을 rc1111a(332257c6)로 승격했다. 롤백 대상은 rc1021a(fd24f3a2)다.
 #
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로

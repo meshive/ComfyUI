@@ -121,7 +121,7 @@ variable "TORCHVISION_VERSION_CU130" {
 #
 # v0.44.1 → v0.45.1 (2026-11-11): MiniMax-H3-Image 네이티브 지원(v0.45.0, ComfyUI#17655 — `MiniMaxH3ImageConditioning`,
 # comfy/ldm/minimax 의 model·vae·sampling)이 이유다. **v0.45.0 미만으로 내리면 WSB `minimax-h3-image` 자산 세트의 동봉
-# workflow 가 열리지 않는다**(2026-11-11 기준 is_active false). v0.45.1(2026-11-10, 02457b8c)은 v0.45.0(989d93d0, GitHub
+# workflow 가 열리지 않는다**(2026-11-19 활성화, 같은 날 rc1111a 를 정식 태그로 승격). v0.45.1(2026-11-10, 02457b8c)은 v0.45.0(989d93d0, GitHub
 # Release)의 후손 패치 태그이고, 차이는 API 파트너 노드(LTX AlphaGen·Reframe·SDR to HDR·Upscale, MiniMax H3 Image API)와
 # workflow-templates 0.11.105→0.11.106 뿐이다. 0.11.106 의 H3-Image 템플릿 2개는 세트 동봉 판과 바이트가 같다.
 # master 의 #17675(CreateVideo chroma_subsampling 에 "none" 복구)는 v0.45.1 에 없다 — 시드 workflow 는 그 위젯을 쓰지 않는다.
