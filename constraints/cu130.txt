@@ -103,7 +103,16 @@
 #     같은 버전이다.
 #   - 새 판들의 Requires-Dist 는 비었거나(frontend·embedded-docs·하위 4개) 같은 모양이다(workflow-templates 는 하위 패키지를 `==` 로)
 #     — PyPI JSON 기준. 모두 py3-none-any 휠이다.
-#   → 검증 이미지 기록은 빌드 뒤 여기에 추가한다.
+#   → 이 잠금으로 빌드한 base-torch2.11.0-cu130-rc1125a(index sha256:ab31304f7608e1734292726e65200ae8d6593075bd5a35cd881f6ade4836c2a6,
+#     amd64 sha256:0dfe37d960190485137bbe19c07f3c278a4877d9e036303511d4bd5ac1a9cf9e)가 대조 272줄과 node-check(custom node 24·
+#     registry id 20/20)를 통과했다. 이미지 안 ComfyUI 는 v0.46.3(cab5f4e13), 프론트 1.59.6 이다.
+#     → 2026-11-25 real RTX 5090(8 vCPU·40GiB RAM, 커스텀 템플릿 comfyui-rc1125a-sensenova-test, /workspace 로컬 60GiB)에서
+#       sensenova-u1.6 두 템플릿을 돌렸다. 0.11.118 템플릿 창에서 열었고, 누락 모델 4개는 패널의 "Install in Pod"(MeshiveInjection)로
+#       /workspace 볼륨에 받았다(임시 저장 아님). 프론트 1.59.6 에서 첫 실행 템플릿 창·누락 모델 패널·Pod 설치 버튼이 그대로 동작했다.
+#       t2i: 기본값(PE 켬·self-correction 켬·50 step·cfg 4, 4:3 4MP → 2368×1760) 49.9s(콜드), Turbo(8 step LoRA·cfg 1) 8.1s.
+#       edit: 기본 지시문 68.2s, 지시문을 바꿔 PE 를 다시 돌린 재실행 62.8s(1664×2496). 입력 이미지 내용을 읽은 확장 프롬프트가 나왔고
+#         지시한 부분만 바뀌었다. 4회 모두 크래시 없이 성공했고, 결과 이미지는 눈으로 확인했다. 실행 뒤 VRAM 사용 약 27.9GB(상주 포함).
+#       다른 세트의 생성 회귀는 하지 않았다(유저 결정 — SenseNova 만).
 #
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
