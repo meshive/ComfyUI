@@ -94,6 +94,17 @@
 #       flux3-klein 은 돌리지 않았다. BFL gated 레포라 HF 토큰 없이는 파일을 받을 수 없다(유저 결정으로 생략).
 #     → 같은 날 정식 태그 base-torch2.11.0-cu130 을 rc1111a(332257c6)로 승격했다. 롤백 대상은 rc1021a(fd24f3a2)다.
 #
+# 2026-11-25 ComfyUI v0.45.1 → v0.46.3 (SenseNova U1.6 지원): 같은 방식으로 6줄을 고치고 1줄을 더했다 (271 → 272줄).
+#   - v0.46.3 requirements 의 `==` 3개: frontend 1.59.6·workflow-templates 0.11.118·embedded-docs 0.5.17. kitchen 0.2.41·aimdo
+#     0.6.0 은 그대로다.
+#   - workflow-templates 0.11.118 이 `==` 로 요구하는 하위 패키지는 9개로 늘었다. 바뀐 3개는 core 0.3.408·json 0.1.143·
+#     media-assets-02 0.1.36 이고, **새로 생긴 media-assets-03 0.1.2** 를 한 줄 더했다(이 줄이 없으면 빌드 마지막 대조에 `>` 로
+#     나온다). 나머지 5개(media-api 0.3.84·media-assets-01 0.1.48·media-image 0.3.160·media-other 0.3.229·media-video 0.3.101)는
+#     같은 버전이다.
+#   - 새 판들의 Requires-Dist 는 비었거나(frontend·embedded-docs·하위 4개) 같은 모양이다(workflow-templates 는 하위 패키지를 `==` 로)
+#     — PyPI JSON 기준. 모두 py3-none-any 휠이다.
+#   → 검증 이미지 기록은 빌드 뒤 여기에 추가한다.
+#
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로
 #     넘긴다. 직접 URL 을 constraint 로 주면, 요구하는 쪽 URL 모양이 다를 때 pip 가 ResolutionImpossible
@@ -157,18 +168,19 @@ colour-science==0.4.7
 comfy-aimdo==0.6.0
 comfy-angle==0.1.1
 comfy-kitchen==0.2.41
-comfyui-embedded-docs==0.5.16
+comfyui-embedded-docs==0.5.17
 comfyui-manager==4.3
-comfyui-workflow-templates-core==0.3.397
-comfyui-workflow-templates-json==0.1.132
+comfyui-workflow-templates-core==0.3.408
+comfyui-workflow-templates-json==0.1.143
 comfyui-workflow-templates-media-api==0.3.84
 comfyui-workflow-templates-media-assets-01==0.1.48
-comfyui-workflow-templates-media-assets-02==0.1.31
+comfyui-workflow-templates-media-assets-02==0.1.36
+comfyui-workflow-templates-media-assets-03==0.1.2
 comfyui-workflow-templates-media-image==0.3.160
 comfyui-workflow-templates-media-other==0.3.229
 comfyui-workflow-templates-media-video==0.3.101
-comfyui_frontend_package==1.58.5
-comfyui_workflow_templates==0.11.106
+comfyui_frontend_package==1.59.6
+comfyui_workflow_templates==0.11.118
 comm==0.2.3
 contourpy==1.4.0
 cryptography==50.0.1

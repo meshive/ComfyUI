@@ -139,8 +139,30 @@ variable "TORCHVISION_VERSION_CU130" {
 # 테마 변수 --warning-/--success-/--destructive-background 가 없어지고 나머지 옛 변수는 _deprecated-aliases.css 로 옮겨졌다 —
 # ComfyUI-MeshiveInjection v1.4.4 가 이미 대체값을 둔다. 시작 경로에 URL 의 폴더 workflow 열기(useFolderWorkflowsUrlLoader)가
 # 생겼지만 그 파라미터가 있을 때만 탄다.
+#
+# v0.45.1 → v0.46.3 (2026-11-25): SenseNova U1.6 의 thinking·interleave·self-correction 지원(v0.46.0, ComfyUI#16032·#17790 —
+# `SenseNovaConditioning`·`SenseNovaInterleaveDecode`)이 이유다. **v0.46.0 미만으로 내리면 WSB `sensenova-u1.6` 자산 세트의
+# 동봉 workflow 가 열리지 않는다**(2026-11-25 기준 is_active false). v0.45.1 의 nodes_sensenova.py 에는 `SenseNovaSamplingOptions`
+# 하나뿐이다. v0.46.3(2026-11-24, cab5f4e1)은 v0.46.0(a277b5bf, GitHub Release)의 후손 패치 태그이고, v0.46.0 뒤 차이는 API 파트너
+# 노드와 workflow-templates 0.11.111→0.11.118 뿐이다. 0.11.118 의 SenseNova 템플릿 2개는 세트 동봉 판과 바이트가 같다.
+# v0.45.1 쪽에만 있는 커밋 4개는 v0.46 에 같은 PR 로 들어간 cherry-pick 과 태그 커밋이다.
+# requirements 차이(v0.45.1 → v0.46.3): frontend 1.58.5→1.59.6, workflow-templates 0.11.106→0.11.118, embedded-docs 0.5.16→0.5.17.
+# kitchen·aimdo 그대로, 새 의존성 없음, torch 줄 그대로. manager_requirements.txt·agent_requirements.txt 는 같다(comfyui_manager==4.2.2).
+# CLI 인자: `--directml` 삭제(#17711, 이 이미지는 안 쓴다), `--force-output-rerun` 추가. 삭제된 node_id 는 유료 Luma 노드 6개뿐이고
+# (Comfy Router 로 옮김, #17714) 새 deprecated 는 없다. 시드 workflow 33개가 쓰는 노드 92종은 v0.46.3 에 전부 있다(소스 대조).
+# ⚠️ 결과가 달라질 수 있어 생성 회귀가 필요한 세트:
+#    - Qwen3.5 토크나이저가 pad·stop 토큰을 어휘에서 읽는다(#17633, 하드코딩 248044 를 걷어냄) — Qwen3.5 로 TextGenerate 를
+#      돌리는 moss-image·qwen-image-2.1·minimax-h3-image·flux3-klein·sensenova-u1.6.
+#    - ops.py 가 QuantizedTensor 입력의 cast dtype 을 따로 고르지 않는다, model_patcher 의 buffer 백업·복원이 모듈 단위로 바뀌었다
+#      (#16491 — 모델을 바꿔 가며 돌릴 때 sampling schedule 이 새던 문제) — int8/fp8 양자화 세트 전반.
+#    - #17741(cfg 1.0 에서 APG 가 결과를 바꾸던 문제)은 시드 workflow 에 APG 노드가 없어 해당 없다.
+# 프론트 1.59.6 에서 우리 확장이 기대는 지점(missingModel 스토어 id·`missingModelCandidates`·missing-model-download/-all/-gated-access
+# data-testid·Comfy.Workflow.Draft.v2 키·createNewTemporary·loadGraphData 시그니처·workspaceStore 의 toast·setting·
+# actionBarButtons·Comfy.TutorialCompleted 시작 분기·MeshiveInjection 이 읽는 테마 변수)이 1.58.5 와 같은 것을 프론트 소스 태그
+# 대조로 확인했다. 바뀐 점: missingModel 폴더가 src/platform/workflowErrors/missingModel 로 옮겨졌다(코드는 import 경로 말고 같다),
+# draft 에 lineage 가 붙고 clientId 없는 세션 포인터를 받는다 — 키 이름은 그대로다.
 variable "COMFYUI_VERSION" {
-    default = "v0.45.1"
+    default = "v0.46.3"
 }
 
 # 내장 ComfyUI-Manager(pip 패키지 comfyui_manager) 버전. Dockerfile 이 ComfyUI 와 같은 RUN 에서
@@ -151,7 +173,7 @@ variable "COMFYUI_VERSION" {
 # 'comfyui-manager' 가 든 레거시 사본은 폴더 이름만으로 로드가 막힌다(comfyui_manager.should_be_disabled, 로그는
 # INFO 'Blocked by policy' 한 줄) — 유저 볼륨에 남은 옛 사본도 마찬가지다.
 #
-# **4.2.2(ComfyUI v0.45.1 의 manager_requirements.txt 고정값, v0.44.0 부터 같다)가 아니라 4.3 인 이유:**
+# **4.2.2(ComfyUI v0.46.3 의 manager_requirements.txt 고정값, v0.44.0 부터 같다)가 아니라 4.3 인 이유:**
 #   - Pod 의 ComfyUI 는 `--listen`(0.0.0.0,::) 이라 Manager 가 비-loopback 으로 본다. 4.2.2 새 UI 의 노드 설치는 맨 앞
 #     'middle+' 검사에서 network_mode=personal_cloud 가 아니면 **전부** 막힌다(glob/manager_server.py do_install).
 #     4.3 은 stable CNR 설치만 'middle' 로 내려 허용한다. nightly 설치·Registry 에 없는(git) 노드 설치, update all,
