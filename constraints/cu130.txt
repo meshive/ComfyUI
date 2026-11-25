@@ -114,7 +114,7 @@
 #         지시한 부분만 바뀌었다. 4회 모두 크래시 없이 성공했고, 결과 이미지는 눈으로 확인했다. 실행 뒤 VRAM 사용 약 27.9GB(상주 포함).
 #       다른 세트의 생성 회귀는 하지 않았다(유저 결정 — SenseNova 만).
 #     → 같은 날 정식 태그 base-torch2.11.0-cu130 을 rc1125a(ab31304f)로 승격했다(유저 결정). 롤백 대상은 rc1111a(332257c6)다.
-#       WSB sensenova-u1.6 세트는 아직 is_active false 다.
+#       WSB sensenova-u1.6 세트는 같은 날 dev 에서 켰다(WSB 39fb8ae1). real 반영은 WSB real 머지 뒤다.
 #
 # Dockerfile 이 쓰는 방식:
 #   - `@` 가 있는 줄(직접 URL)과 주석을 뺀 나머지를 /pip-constraints.txt 로 만들어 PIP_CONSTRAINT 로

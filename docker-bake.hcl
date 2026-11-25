@@ -142,7 +142,7 @@ variable "TORCHVISION_VERSION_CU130" {
 #
 # v0.45.1 → v0.46.3 (2026-11-25): SenseNova U1.6 의 thinking·interleave·self-correction 지원(v0.46.0, ComfyUI#16032·#17790 —
 # `SenseNovaConditioning`·`SenseNovaInterleaveDecode`)이 이유다. **v0.46.0 미만으로 내리면 WSB `sensenova-u1.6` 자산 세트의
-# 동봉 workflow 가 열리지 않는다**(2026-11-25 기준 is_active false). v0.45.1 의 nodes_sensenova.py 에는 `SenseNovaSamplingOptions`
+# 동봉 workflow 가 열리지 않는다**(2026-11-25 dev 활성화, 같은 날 rc1125a 를 정식 태그로 승격). v0.45.1 의 nodes_sensenova.py 에는 `SenseNovaSamplingOptions`
 # 하나뿐이다. v0.46.3(2026-11-24, cab5f4e1)은 v0.46.0(a277b5bf, GitHub Release)의 후손 패치 태그이고, v0.46.0 뒤 차이는 API 파트너
 # 노드와 workflow-templates 0.11.111→0.11.118 뿐이다. 0.11.118 의 SenseNova 템플릿 2개는 세트 동봉 판과 바이트가 같다.
 # v0.45.1 쪽에만 있는 커밋 4개는 v0.46 에 같은 PR 로 들어간 cherry-pick 과 태그 커밋이다.
